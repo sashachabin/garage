@@ -1443,46 +1443,48 @@ function buildRoom() {
   addHeightGradient(back.geometry, 0.55, 1);
   scene.add(back);
 
-  // Ворота на лицевой стене — закрыты (две секции на весь проём)
-  const face = new THREE.Group();
-  const gateMat = new THREE.MeshLambertMaterial({
-    color: 0x9aa1a6,
-    roughness: 0.55,
-    metalness: 0.35,
+  // Лицевая стена — серая штукатурка (wall.jpg), ворота лежат на ней
+  const faceMat = tex("textures/wall.jpg", WID, H, 0x9a9a92);
+  faceMat.vertexColors = true;
+  const faceWall = new THREE.Mesh(new THREE.PlaneGeometry(WID + 0.06, H), faceMat);
+  faceWall.position.set(0, wallY, Z_FRONT);
+  addHeightGradient(faceWall.geometry, 0.55, 1);
+  scene.add(faceWall);
+
+  // Ворота-дверь: полигон с door.jpg, аккуратно по центру, не на всю стену
+  const doorTex = new THREE.TextureLoader().load("textures/door.jpg");
+  doorTex.colorSpace = THREE.SRGBColorSpace;
+  doorTex.anisotropy = 8;
+  const doorMat = new THREE.MeshLambertMaterial({
+    map: doorTex,
+    side: THREE.DoubleSide,
+    color: 0x9a9a9a, // чуть темнее
   });
-  // нижняя секция ворот
-  const gateLow = new THREE.Mesh(new THREE.BoxGeometry(WID + 0.04, 1.3, 0.07), gateMat);
-  gateLow.position.set(0, 0.65, Z_FRONT + 0.05);
-  face.add(gateLow);
-  // верхняя секция ворот
-  const gateHigh = new THREE.Mesh(new THREE.BoxGeometry(WID + 0.04, H - 1.3, 0.07), gateMat);
-  gateHigh.position.set(0, H - (H - 1.3) / 2 - 0.02, Z_FRONT + 0.05);
-  face.add(gateHigh);
-  // горизонтальные рёбра-панели на обеих секциях
-  for (let y = 0.25; y < H; y += 0.5) {
-    const rib = new THREE.Mesh(
-      new THREE.BoxGeometry(WID + 0.06, 0.03, 0.02),
-      new THREE.MeshLambertMaterial({ color: 0x6e7478, roughness: 0.5, metalness: 0.4 }),
-    );
-    rib.position.set(0, y, Z_FRONT + 0.11);
-    face.add(rib);
-  }
-  const header = new THREE.Mesh(
-    new THREE.BoxGeometry(WID + 0.15, 0.14, 0.14),
-    new THREE.MeshLambertMaterial({ color: 0x70767a, roughness: 0.6, metalness: 0.3 }),
-  );
-  header.position.set(0, H - 0.08, Z_FRONT + 0.1);
-  face.add(header);
-  const postL = new THREE.Mesh(
-    new THREE.BoxGeometry(0.12, H, 0.14),
-    new THREE.MeshLambertMaterial({ color: 0x8d8d8d, roughness: 0.9 }),
-  );
-  postL.position.set(IWL + 0.06, wallY, Z_FRONT + 0.06);
-  face.add(postL);
-  const postR = new THREE.Mesh(new THREE.BoxGeometry(0.12, H, 0.14), grayMat);
-  postR.position.set(IWR - 0.06, wallY, Z_FRONT + 0.06);
-  face.add(postR);
-  scene.add(face);
+  const DW = 2.95;
+  const DH = DW * (569 / 953); // ≈ 1.55 — пропорция текстуры, без искажений
+  const door = new THREE.Mesh(new THREE.PlaneGeometry(DW, DH), doorMat);
+  door.rotation.y = Math.PI; // лицевая сторона — внутрь гаража
+  door.position.set(0, DH / 2 + 0.06, Z_FRONT - 0.045);
+  scene.add(door);
+
+  // Тёмная рама вокруг ворот
+  const frameMat = new THREE.MeshLambertMaterial({
+    color: 0x23272c,
+    roughness: 0.6,
+    metalness: 0.25,
+  });
+  const fr = 0.07; // ширина перекладин рамы
+  const fz = 0.035; // толщина рамы
+  const fz0 = Z_FRONT - 0.045;
+  const frameTop = new THREE.Mesh(new THREE.BoxGeometry(DW + fr * 2, fr, fz), frameMat);
+  frameTop.position.set(0, DH + 0.06 + fr / 2, fz0);
+  const frameBot = new THREE.Mesh(new THREE.BoxGeometry(DW + fr * 2, fr, fz), frameMat);
+  frameBot.position.set(0, 0.06 - fr / 2, fz0);
+  const frameL = new THREE.Mesh(new THREE.BoxGeometry(fr, DH + fr * 2, fz), frameMat);
+  frameL.position.set(-DW / 2 - fr / 2, DH / 2 + 0.06, fz0);
+  const frameR = new THREE.Mesh(new THREE.BoxGeometry(fr, DH + fr * 2, fz), frameMat);
+  frameR.position.set(DW / 2 + fr / 2, DH / 2 + 0.06, fz0);
+  scene.add(frameTop, frameBot, frameL, frameR);
 
   // Перегородка с проёмом-аркой (та же wall.jpg, что у стен)
   const pw = IWR - ARCH_X1; // ширина пилона с каждой боковины
