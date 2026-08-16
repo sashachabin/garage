@@ -1,0 +1,8 @@
+{
+  "ignorePatterns": ["node_modules/**", "posters/**", "textures/**", "lhr.log"],
+  "rules": {
+    "no-console": "off",
+    "no-undef": "off",
+    "no-unused-vars": ["warn", { "varsIgnorePattern": "^_" }]
+  }
+}

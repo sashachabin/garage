@@ -2,15 +2,22 @@
   "name": "garage",
   "version": "1.0.0",
   "description": "Браузерный гараж на three.js",
+  "keywords": [],
+  "license": "ISC",
+  "author": "",
+  "type": "commonjs",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "lint": "oxlint --config .oxlintrc.json .",
+    "format": "oxfmt --write .",
+    "format:check": "oxfmt --check ."
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "type": "commonjs",
   "dependencies": {
     "ws": "^8.21.3"
+  },
+  "devDependencies": {
+    "oxfmt": "^0.63.0",
+    "oxlint": "^1.78.0"
   }
 }
