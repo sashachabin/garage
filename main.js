@@ -178,6 +178,7 @@ function applyRadioState(station, volume) {
 }
 function openRadioMenu() {
   radioMenuOpen = true;
+  if (document.pointerLockElement) document.exitPointerLock();
   document.body.classList.add("menu");
   const el = document.getElementById("radiomenu");
   if (el) el.classList.add("open");
@@ -791,6 +792,7 @@ function toggleChat() {
 }
 function openChat() {
   chatOpen = true;
+  if (document.pointerLockElement) document.exitPointerLock();
   const box = document.getElementById("chat");
   if (!box) return;
   box.classList.add("open");
@@ -2521,9 +2523,22 @@ function updateCamera(dt) {
 }
 
 function onPointerDown(e) {
-  // Клик левой кнопкой / тап — удар (если не чат и не меню)
-  if (e.button === 0 && !chatOpen && !radioMenuOpen) tryPunch();
+  // Pointer lock: клик захватывает курсор (Esc — показывает обратно).
+  // Первый клик только захватывает, последующие бьют.
+  if (e.button === 0) {
+    if (document.pointerLockElement !== renderer.domElement) {
+      renderer.domElement.requestPointerLock();
+      return;
+    }
+    if (!chatOpen && !radioMenuOpen) tryPunch();
+  }
 }
+function onPointerLockChange() {
+  const locked = document.pointerLockElement === renderer.domElement;
+  const hint = document.getElementById("curhint");
+  if (hint) hint.style.display = locked ? "block" : "none";
+}
+document.addEventListener("pointerlockchange", onPointerLockChange);
 function onPointerMove(e) {
   if (chatOpen || radioMenuOpen) return;
   // Движение мыши крутит камеру без нажатия.

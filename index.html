@@ -227,6 +227,13 @@
   }
   #radiohint.show { display: block; }
 
+  #curhint {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+    z-index: 20; color: #fff; background: rgba(0,0,0,.55);
+    padding: 6px 14px; border-radius: 8px; font-size: 13px;
+    pointer-events: none; user-select: none; display: none;
+  }
+
   /* Вспышка при ударе */
   #hitflash {
     position: fixed; inset: 0; z-index: 20; pointer-events: none; opacity: 0;
@@ -353,6 +360,7 @@
 <div id="hitflash"></div>
 
 <div id="radiohint">E — радио / переключить станцию</div>
+<div id="curhint">Esc — показать курсор</div>
 <div id="radiomenu">
   <div class="rm-face">
     <div class="rm-lcd">
