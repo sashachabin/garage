@@ -21,7 +21,7 @@ const T = 0.12; // толщина стен и перегородки
 const H = 2.6; // потолок чуть повыше
 
 const ROOM_REAR_L = 6.21; // дальнее помещение (мастерская)
-const ROOM_FRONT_L = 5.74; // ближнее помещение (ворота)
+const ROOM_FRONT_L = 6.6; // ближнее помещение (ворота)
 const Z_REAR = -ROOM_REAR_L; // задняя торцевая стена
 const Z_PART = 0; // ось перегородки
 const Z_FRONT = Z_PART + T + ROOM_FRONT_L; // лицевая стена (5.56)
@@ -1464,11 +1464,15 @@ function buildRoom() {
   }
 
   // Лампа из стены левее красного шкафа (у верстака)
-  const lampLight = new THREE.SpotLight(0xffd8aa, 3.5, 7, 0.65, 0.45, 1.0);
+  const lampLight = new THREE.SpotLight(0xffd8aa, 7.5, 8, 0.75, 0.5, 1.0);
   lampLight.position.set(0.4, 1.85, -6.1);
   lampLight.target.position.set(0.4, 0.95, -5.9);
   scene.add(lampLight);
   scene.add(lampLight.target);
+  // мягкая заливка зоны у красного шкафа (без яркого пятна на нём)
+  const lampFill = new THREE.PointLight(0xffd8aa, 1.5, 6.0, 1.6);
+  lampFill.position.set(0.4, 1.85, -6.1);
+  scene.add(lampFill);
 
   // Ворота-дверь: полигон с door.jpg, аккуратно по центру, не на всю стену
   const doorTex = new THREE.TextureLoader().load("textures/door.jpg");
@@ -1554,6 +1558,157 @@ function buildRoom() {
 // дают коллизию; «радио_корпус» — позицию звука радио.
 // ---------------------------------------------------------------------------
 const matCache = new Map();
+
+// Плоское зеркало с настоящим отражением (three.js examples, Reflector.js r160)
+class Reflector extends THREE.Mesh {
+  constructor(geometry, options = {}) {
+    super(geometry);
+    this.isReflector = true;
+    this.type = "Reflector";
+    this.camera = new THREE.PerspectiveCamera();
+    const scope = this;
+    const color = options.color !== undefined ? new THREE.Color(options.color) : new THREE.Color(0x7f7f7f);
+    const textureWidth = options.textureWidth || 512;
+    const textureHeight = options.textureHeight || 512;
+    const clipBias = options.clipBias || 0;
+    const shader = options.shader || Reflector.ReflectorShader;
+    const multisample = options.multisample !== undefined ? options.multisample : 4;
+    const reflectorPlane = new THREE.Plane();
+    const normal = new THREE.Vector3();
+    const reflectorWorldPosition = new THREE.Vector3();
+    const cameraWorldPosition = new THREE.Vector3();
+    const rotationMatrix = new THREE.Matrix4();
+    const lookAtPosition = new THREE.Vector3(0, 0, -1);
+    const clipPlane = new THREE.Vector4();
+    const view = new THREE.Vector3();
+    const target = new THREE.Vector3();
+    const q = new THREE.Vector4();
+    const textureMatrix = new THREE.Matrix4();
+    const virtualCamera = this.camera;
+    const renderTarget = new THREE.WebGLRenderTarget(textureWidth, textureHeight, {
+      samples: multisample,
+      type: THREE.HalfFloatType,
+    });
+    const material = new THREE.ShaderMaterial({
+      name: shader.name !== undefined ? shader.name : "unspecified",
+      uniforms: THREE.UniformsUtils.clone(shader.uniforms),
+      fragmentShader: shader.fragmentShader,
+      vertexShader: shader.vertexShader,
+    });
+    material.uniforms["tDiffuse"].value = renderTarget.texture;
+    material.uniforms["color"].value = color;
+    material.uniforms["textureMatrix"].value = textureMatrix;
+    this.material = material;
+    this.onBeforeRender = function (renderer, scene, camera) {
+      reflectorWorldPosition.setFromMatrixPosition(scope.matrixWorld);
+      cameraWorldPosition.setFromMatrixPosition(camera.matrixWorld);
+      rotationMatrix.extractRotation(scope.matrixWorld);
+      normal.set(0, 0, 1);
+      normal.applyMatrix4(rotationMatrix);
+      view.subVectors(reflectorWorldPosition, cameraWorldPosition);
+      if (view.dot(normal) > 0) return;
+      view.reflect(normal).negate();
+      view.add(reflectorWorldPosition);
+      rotationMatrix.extractRotation(camera.matrixWorld);
+      lookAtPosition.set(0, 0, -1);
+      lookAtPosition.applyMatrix4(rotationMatrix);
+      lookAtPosition.add(cameraWorldPosition);
+      target.subVectors(reflectorWorldPosition, lookAtPosition);
+      target.reflect(normal).negate();
+      target.add(reflectorWorldPosition);
+      virtualCamera.position.copy(view);
+      virtualCamera.up.set(0, 1, 0);
+      virtualCamera.up.applyMatrix4(rotationMatrix);
+      virtualCamera.up.reflect(normal);
+      virtualCamera.lookAt(target);
+      virtualCamera.far = camera.far;
+      virtualCamera.updateMatrixWorld();
+      virtualCamera.projectionMatrix.copy(camera.projectionMatrix);
+      textureMatrix.set(
+        0.5, 0.0, 0.0, 0.5,
+        0.0, 0.5, 0.0, 0.5,
+        0.0, 0.0, 0.5, 0.5,
+        0.0, 0.0, 0.0, 1.0,
+      );
+      textureMatrix.multiply(virtualCamera.projectionMatrix);
+      textureMatrix.multiply(virtualCamera.matrixWorldInverse);
+      textureMatrix.multiply(scope.matrixWorld);
+      reflectorPlane.setFromNormalAndCoplanarPoint(normal, reflectorWorldPosition);
+      reflectorPlane.applyMatrix4(virtualCamera.matrixWorldInverse);
+      clipPlane.set(reflectorPlane.normal.x, reflectorPlane.normal.y, reflectorPlane.normal.z, reflectorPlane.constant);
+      const projectionMatrix = virtualCamera.projectionMatrix;
+      q.x = (Math.sign(clipPlane.x) + projectionMatrix.elements[8]) / projectionMatrix.elements[0];
+      q.y = (Math.sign(clipPlane.y) + projectionMatrix.elements[9]) / projectionMatrix.elements[5];
+      q.z = -1.0;
+      q.w = (1.0 + projectionMatrix.elements[10]) / projectionMatrix.elements[14];
+      clipPlane.multiplyScalar(2.0 / clipPlane.dot(q));
+      projectionMatrix.elements[2] = clipPlane.x;
+      projectionMatrix.elements[6] = clipPlane.y;
+      projectionMatrix.elements[10] = clipPlane.z + 1.0 - clipBias;
+      projectionMatrix.elements[14] = clipPlane.w;
+      scope.visible = false;
+      const currentRenderTarget = renderer.getRenderTarget();
+      const currentXrEnabled = renderer.xr.enabled;
+      const currentShadowAutoUpdate = renderer.shadowMap.autoUpdate;
+      renderer.xr.enabled = false;
+      renderer.shadowMap.autoUpdate = false;
+      renderer.setRenderTarget(renderTarget);
+      renderer.state.buffers.depth.setMask(true);
+      if (renderer.autoClear === false) renderer.clear();
+      renderer.render(scene, virtualCamera);
+      renderer.xr.enabled = currentXrEnabled;
+      renderer.shadowMap.autoUpdate = currentShadowAutoUpdate;
+      renderer.setRenderTarget(currentRenderTarget);
+      const viewport = camera.viewport;
+      if (viewport !== undefined) renderer.state.viewport(viewport);
+      scope.visible = true;
+    };
+    this.getRenderTarget = function () {
+      return renderTarget;
+    };
+    this.dispose = function () {
+      renderTarget.dispose();
+      scope.material.dispose();
+    };
+  }
+}
+Reflector.ReflectorShader = {
+  name: "ReflectorShader",
+  uniforms: {
+    color: { value: null },
+    tDiffuse: { value: null },
+    textureMatrix: { value: null },
+  },
+  vertexShader: /* glsl */ `
+    uniform mat4 textureMatrix;
+    varying vec4 vUv;
+    #include <common>
+    #include <logdepthbuf_pars_vertex>
+    void main() {
+      vUv = textureMatrix * vec4( position, 1.0 );
+      gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+      #include <logdepthbuf_vertex>
+    }`,
+  fragmentShader: /* glsl */ `
+    uniform vec3 color;
+    uniform sampler2D tDiffuse;
+    varying vec4 vUv;
+    #include <logdepthbuf_pars_fragment>
+    float blendOverlay( float base, float blend ) {
+      return( base < 0.5 ? ( 2.0 * base * blend ) : ( 1.0 - 2.0 * ( 1.0 - base ) * ( 1.0 - blend ) ) );
+    }
+    vec3 blendOverlay( vec3 base, vec3 blend ) {
+      return vec3( blendOverlay( base.r, blend.r ), blendOverlay( base.g, blend.g ), blendOverlay( base.b, blend.b ) );
+    }
+    void main() {
+      #include <logdepthbuf_fragment>
+      vec4 base = texture2DProj( tDiffuse, vUv );
+      gl_FragColor = vec4( blendOverlay( base.rgb, color ), 1.0 );
+      #include <tonemapping_fragment>
+      #include <colorspace_fragment>
+    }`,
+};
+
 async function buildFurniture() {
   let list = [];
   try {
@@ -1602,7 +1757,9 @@ async function buildFurniture() {
             ? new THREE.CylinderGeometry(s[0], s[1], s[2], 12)
             : d.kind === "sphere"
               ? new THREE.SphereGeometry(s[0], 10, 8)
-              : new THREE.BoxGeometry(s[0], s[1], s[2]);
+              : d.kind === "torus"
+                ? new THREE.TorusGeometry(s[0], s[1], 10, 24)
+                : new THREE.BoxGeometry(s[0], s[1], s[2]);
     const mesh = new THREE.Mesh(g, mat(d.color, d.opacity, d.emissive));
     mesh.castShadow = true;
     return mesh;
@@ -1632,6 +1789,18 @@ async function buildFurniture() {
 
   for (const d of list) {
     const n = d.name || "";
+    if (n === "зеркало_1") {
+      // настоящее зеркало: плоскость с отражением вместо простого box
+      const s = d.size || [0.02, 0.9, 0.5];
+      const refl = new Reflector(new THREE.PlaneGeometry(s[2], s[1]), {
+        color: 0xf5f7fa,
+        clipBias: 0.003,
+      });
+      refl.position.set(d.pos[0], d.pos[1], d.pos[2]);
+      refl.rotation.y = Math.PI / 2;
+      scene.add(refl);
+      continue;
+    }
     const root = build(d);
     const x = d.pos[0],
       z = d.pos[2];
@@ -1648,6 +1817,18 @@ async function buildFurniture() {
       };
       colliders.push({ minX: x - 0.3, maxX: x + 0.3, minZ: z - 0.3, maxZ: z + 0.3 });
       chairSeats.push(root);
+    } else if (n.startsWith("диван_")) {
+      // диван на несколько мест: виртуальные сиденья вдоль длины, лицом к центру
+      const N = 6,
+        L = 2.5; // размах мест — внутри дивана, без подлокотников
+      for (let i = 0; i < N; i++) {
+        const zz = z + (i - (N - 1) / 2) * (L / (N - 1));
+        chairSeats.push({
+          position: new THREE.Vector3(x, 0, zz),
+          userData: { seat: { yaw: Math.PI / 2, h: 0.4, table: false } },
+        });
+      }
+      colliders.push({ minX: x - 0.3, maxX: x + 0.3, minZ: z - 1.4, maxZ: z + 1.4 });
     } else if (n === "столешница") {
       const w = d.size[0],
         l = d.size[2];
@@ -1683,7 +1864,21 @@ async function buildFurniture() {
     } else if (n === "холодильник_корпус") {
       colliders.push({ minX: x - 0.23, maxX: x + 0.23, minZ: z - 0.22, maxZ: z + 0.22 });
     } else if (n === "сейф_корпус") {
-      colliders.push({ minX: x - 0.36, maxX: x + 0.36, minZ: z - 0.18, maxZ: z + 0.18 });
+      // сейф может быть повёрнут — считаем габариты с учётом поворота
+      const w = d.size[0],
+        l = d.size[2];
+      const ry = ((d.rot_deg && d.rot_deg[1]) || 0) * D2R;
+      const cr = Math.abs(Math.cos(ry)),
+        sr = Math.abs(Math.sin(ry));
+      colliders.push({
+        minX: x - (w * cr + l * sr) / 2,
+        maxX: x + (w * cr + l * sr) / 2,
+        minZ: z - (w * sr + l * cr) / 2,
+        maxZ: z + (w * sr + l * cr) / 2,
+      });
+    } else if (n === "вешалка_планка") {
+      // вешалка с одеждой выступает из стены в комнату
+      colliders.push({ minX: x - 0.04, maxX: x + 0.33, minZ: z - 0.6, maxZ: z + 0.6 });
     } else if (n === "радио_корпус") {
       GARAGE_RADIO_POS.x = x + 0.12;
       GARAGE_RADIO_POS.z = z;
@@ -1691,13 +1886,16 @@ async function buildFurniture() {
       // полки и стеллажи: блокируют камеру только на высоте полки
       const w = d.size[0],
         l = d.size[2];
+      // полки, нависающие ниже верха проёма, — сплошная преграда для камеры:
+      // нельзя «бродить» по выступающим от стены областям
+      const isWall = d.pos[1] + d.size[1] / 2 < ARCH_H - 0.1;
       cameraColliders.push({
         minX: x - w / 2 - 0.04,
         maxX: x + w / 2 + 0.04,
         minZ: z - l / 2 - 0.04,
         maxZ: z + l / 2 + 0.04,
-        yLow: d.pos[1] - d.size[1] / 2 - 0.12,
-        yHigh: d.pos[1] + d.size[1] / 2 + 0.12,
+        yLow: isWall ? 0 : d.pos[1] - d.size[1] / 2 - 0.12,
+        yHigh: isWall ? H : d.pos[1] + d.size[1] / 2 + 0.12,
       });
     }
     reg(n, root);
@@ -1816,6 +2014,9 @@ async function buildFurniture() {
     барная_полка_2: ["textures/verstak.jpg", 2, 1],
     ножки_стола: ["textures/tabletop.jpg", 1, 1],
     верстак_ножки: ["textures/verstak.jpg", 1, 1],
+    шкаф_бок_лев: ["textures/verstak.jpg", 1, 1],
+    шкаф_бок_прав: ["textures/verstak.jpg", 1, 1],
+    шкаф_бок_радио: ["textures/verstak.jpg", 1, 1],
   };
   const applyTex = (m, tex, ru, rv) => {
     tex.colorSpace = THREE.SRGBColorSpace;
@@ -1837,6 +2038,28 @@ async function buildFurniture() {
         if (n === "столешница") {
           const ms = root.isGroup ? root.children : [root];
           ms.forEach((m) => m.material && m.material.color.setHex(0xdbcdbe));
+        }
+      },
+      undefined,
+      () => {},
+    );
+  }
+
+  // Доски погреба: текстура пола, но чуть светлее
+  const cellarBoards = [...regObjs.keys()].filter((k) => k.startsWith("погреб_доска"));
+  if (cellarBoards.length) {
+    loader.load(
+      "textures/floor_wood.jpg",
+      (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = 8;
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(0.3, 0.15);
+        for (const n of cellarBoards) {
+          const m = regObjs.get(n);
+          if (!m) continue;
+          m.material = new THREE.MeshLambertMaterial({ color: 0x8a8a8a, map: tex, roughness: 0.7 });
+          m.material.needsUpdate = true;
         }
       },
       undefined,
@@ -1894,6 +2117,9 @@ async function buildFurniture() {
         if (root.isGroup) root.children.forEach((c) => c.material && applyChair(c, color, map));
         else if (root.material) applyChair(root, color, map);
       }
+      // Диван — та же текстура и цвет, что у кресел у верстака (обесцвеченный chair.jpg)
+      const divan = regObjs.get("диван_1");
+      if (divan) divan.children.forEach((c) => c.material && applyChair(c, 0xf2f2f2, grayTex));
     },
     undefined,
     () => {},
@@ -2100,8 +2326,8 @@ let crouched = false,
   eWasDown = false;
 let camTheta = -0.22,
   camPhi = 0,
-  camRadius = 1.7,
-  camTargetRadius = 1.7; // старт: камера по центру (на уровне глаз), небольшой градус по X
+  camRadius = 1.9,
+  camTargetRadius = 1.9; // старт: камера по центру (на уровне глаз), небольшой градус по X
 let lastMX = 0,
   lastMY = 0;
 
@@ -2260,6 +2486,8 @@ function toggleSit() {
   }
   if (best < 0) return;
   sitting = best;
+  camTheta = 0;
+  camPhi = 0; // сели — по умолчанию смотрим прямо вперёд по сиденью
   velSim.px = velSim.pz = velSim.vx = velSim.vz = 0;
   sitPreSit.x = character.position.x;
   sitPreSit.z = character.position.z;
@@ -2646,6 +2874,27 @@ let camLook = new THREE.Vector3();
 function updateCamera(dt) {
   const eyeH = 1.84 * character.scale.y; // глаза: локальная y черепа × масштаб (присев — ниже)
   const eye = character.position.clone().add(new THREE.Vector3(0, eyeH, 0));
+  if (sitting >= 0) {
+    // Сидим: вид от первого лица — модель персонажа скрыта, камера чуть выше глаз
+    if (character.visible) character.visible = false;
+    const hp = camPhi,
+      hy = camTheta;
+    const cy = Math.cos(hp);
+    const fwd = new THREE.Vector3(Math.sin(rotYaw + hy) * cy, Math.sin(hp), Math.cos(rotYaw + hy) * cy);
+    const fpPos = new THREE.Vector3(eye.x, eye.y + 0.07, eye.z);
+    fpPos.y = Math.min(Math.max(fpPos.y, 0.4), ARCH_H);
+    camPos.lerp(fpPos, 1 - Math.pow(0.02, dt));
+    camera.position.copy(camPos);
+    camLook.lerp(camPos.clone().add(fwd), 1 - Math.pow(0.05, dt));
+    camera.lookAt(camLook);
+    const fovSit = 72;
+    if (camera.fov !== fovSit) {
+      camera.fov += (fovSit - camera.fov) * Math.min(1, 8 * dt);
+      camera.updateProjectionMatrix();
+    }
+    return;
+  }
+  if (!character.visible) character.visible = true; // встали — снова 3-е лицо
   // Плавный зум: радиус догоняет цель по кадрам
   camRadius = damp(camRadius, camTargetRadius, 12, dt);
   // Мягкий «возврат» камеры: при ударах и движении камера чуть отходит и плавно возвращается
@@ -2714,7 +2963,7 @@ function updateCamera(dt) {
   // камера не выходит за стены гаража (всего на 0.05 внутрь)
   camPos.x = Math.min(Math.max(camPos.x, IWL + 0.05), IWR - 0.05);
   camPos.z = Math.min(Math.max(camPos.z, Z_REAR + 0.05), Z_FRONT - 0.05);
-  camPos.y = Math.min(Math.max(camPos.y, 0.4), H - 0.05);
+  camPos.y = Math.min(Math.max(camPos.y, 0.4), ARCH_H);
   camera.position.copy(camPos);
   camLook.lerp(eye, 1 - Math.pow(0.05, dt));
   camera.lookAt(camLook);
@@ -2755,7 +3004,8 @@ function onPointerMove(e) {
   lastMX = e.clientX;
   lastMY = e.clientY;
   camTheta -= dx * 0.006;
-  camPhi = Math.min(1.25, Math.max(-0.5, camPhi + dy * 0.0048));
+  // от первого лица (сидя) вертикаль мыши зеркалится
+  camPhi = Math.min(1.25, Math.max(-0.5, camPhi + (sitting >= 0 ? -dy : dy) * 0.0048));
 }
 function onPointerUp() {}
 function onWheel(e) {
