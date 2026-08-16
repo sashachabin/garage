@@ -1033,6 +1033,8 @@ let mouseAcc = 0; // накопитель мыши (режим «спина»)
 let prevTheta = Math.PI / 2; // camTheta на прошлом кадре (для скорости мыши)
 let prevHeadMode = ""; // прошлый режим головы: move | chest | back
 let lastCamTheta = null; // прошлый угол камеры (для лёгкого наклона корпуса)
+let camLeanZ = 0,
+  camLeanX = 0; // сглаженный наклон корпуса от мыши
 let camPulse = 0,
   camPulseTgt = 0; // отдача камеры: чуть отходит при ударах/движении и возвращается
 
@@ -2477,6 +2479,15 @@ function updateAnim(dt) {
     localRefs.head.rotation.x = headPitch;
     prevTheta = camTheta;
   }
+
+  // Живость корпуса: едва заметный плавный наклон в сторону движения мыши
+  if (lastCamTheta === null) lastCamTheta = camTheta;
+  const mM = camTheta - lastCamTheta;
+  lastCamTheta = camTheta;
+  camLeanZ = damp(camLeanZ, THREE.MathUtils.clamp(mM * 0.12, -0.02, 0.02), 8, dt);
+  camLeanX = damp(camLeanX, THREE.MathUtils.clamp(mM * 0.04, -0.008, 0.008), 8, dt);
+  torso.rotation.z += camLeanZ;
+  torso.rotation.x += camLeanX;
 }
 
 // Экспоненциальное сглаживание: cur притягивается к tgt, rate — скорость (1/с)
