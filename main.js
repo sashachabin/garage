@@ -1267,22 +1267,22 @@ function buildLights() {
   // Вертикальный градиент: ярко у потолка, сумрачно у пола.
   // Основной свет — потолочные точки с затуханием 1/d^2, поэтому потолок и
   // верх стен светлые, а пол заметно темнее.
-  scene.add(new THREE.HemisphereLight(0xd8def0, 0x1c2028, 0.72));
-  scene.add(new THREE.AmbientLight(0xffffff, 0.22));
+  scene.add(new THREE.HemisphereLight(0xffe9d4, 0x2a1f14, 0.78));
+  scene.add(new THREE.AmbientLight(0xffead6, 0.32));
 
   // Слабый боковой свет — не подсвечивает пол снизу.
-  const sideLight = new THREE.DirectionalLight(0xfff0d4, 1.6);
+  const sideLight = new THREE.DirectionalLight(0xffe5c6, 1.45);
   sideLight.position.set(-6, 5, 2);
   sideLight.target.position.set(0, H - 1, -2);
   scene.add(sideLight);
   scene.add(sideLight.target);
 
   // Слабые низкие светильники — смягчают переход у пола.
-  const ent = new THREE.PointLight(0xffe6bb, 1.8, 26, 1.6);
+  const ent = new THREE.PointLight(0xffdfb2, 1.4, 26, 1.6);
   ent.position.set(0, 1.6, Z_FRONT + 1.4);
   scene.add(ent);
 
-  const end = new THREE.PointLight(0xffd9a0, 1.5, 7, 1.8);
+  const end = new THREE.PointLight(0xffd08e, 1.15, 7, 1.8);
   end.position.set(-0.4, 1.9, Z_REAR + 0.3);
   scene.add(end);
 
@@ -1290,16 +1290,16 @@ function buildLights() {
   const frontCenterZ = (Z_PART + Z_FRONT) / 2 - 0.5;
   const rearCenterZ = (Z_REAR + Z_PART) / 2;
 
-  const ceilingLight = new THREE.PointLight(0xfff0d4, 6.0, 14, 1.6);
+  const ceilingLight = new THREE.PointLight(0xffe6c6, 5.8, 9.5, 1.6);
   ceilingLight.position.set(0, H - 0.1, frontCenterZ);
   scene.add(ceilingLight);
 
-  const rearCeilLight = new THREE.PointLight(0xfff0d4, 5.0, 14, 1.6);
+  const rearCeilLight = new THREE.PointLight(0xffe6c6, 4.6, 9.5, 1.6);
   rearCeilLight.position.set(0, H - 0.1, rearCenterZ);
   scene.add(rearCeilLight);
 
   // Тёплая подсветка потолочной полки с бутылками (ярче наверху, но мягкая)
-  const shelfGlow = new THREE.PointLight(0xffe0b8, 0.9, 4.0, 1.8);
+  const shelfGlow = new THREE.PointLight(0xffd8a6, 0.9, 3.0, 1.8);
   shelfGlow.position.set(0, 2.1, -5.6);
   scene.add(shelfGlow);
 
@@ -1323,7 +1323,7 @@ function buildLights() {
   const taskZ = [-2.1, -4.3];
   const spotMat = new THREE.MeshLambertMaterial({ color: 0x9fa3a8 });
   for (const z of taskZ) {
-    const sp = new THREE.PointLight(0xfff1d2, 2.2, 6.5, 1.8);
+    const sp = new THREE.PointLight(0xffe6c0, 2.2, 5.2, 1.8);
     sp.position.set(IWL + 0.05, H - 0.12, z);
     scene.add(sp);
 
@@ -1377,7 +1377,8 @@ function buildRoom() {
     const colors = new Float32Array(pos.count * 3);
     for (let i = 0; i < pos.count; i++) {
       const t = ymin === ymax ? 1 : (pos.getY(i) - ymin) / (ymax - ymin);
-      const c = bottomShade + (topShade - bottomShade) * t;
+      const tt = Math.pow(t, 1.8);
+      const c = bottomShade + (topShade - bottomShade) * tt;
       colors[i * 3] = c;
       colors[i * 3 + 1] = c;
       colors[i * 3 + 2] = c;
@@ -1392,7 +1393,9 @@ function buildRoom() {
   const wallLftMat = tex("textures/wall.jpg", ROOM_FRONT_L, H, 0xadadad);
   const wallRgtMat = tex("textures/wall.jpg", TOTAL_LEN, H, 0xadadad);
   wallLftMat.vertexColors = true;
+  wallLftMat.needsUpdate = true;
   wallRgtMat.vertexColors = true;
+  wallRgtMat.needsUpdate = true;
   const wallMat = texBrick("textures/brick_old.jpg", ROOM_REAR_L, H);
   const wallY = H / 2;
 
@@ -1417,21 +1420,21 @@ function buildRoom() {
   const leftRear = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_REAR_L, H), wallMat);
   leftRear.rotation.y = Math.PI / 2;
   leftRear.position.set(IWL, wallY, (Z_REAR + Z_PART) / 2);
-  addHeightGradient(leftRear.geometry, 0.52, 1);
+  addHeightGradient(leftRear.geometry, 0.3, 1);
   scene.add(leftRear);
 
   // Первая (передняя) комната: левая стена — серый бетон
   const leftFront = new THREE.Mesh(new THREE.PlaneGeometry(ROOM_FRONT_L + T, H), wallLftMat);
   leftFront.rotation.y = Math.PI / 2;
   leftFront.position.set(IWL, wallY, (Z_PART + T + Z_FRONT) / 2);
-  addHeightGradient(leftFront.geometry, 0.55, 1);
+  addHeightGradient(leftFront.geometry, 0.3, 1);
   scene.add(leftFront);
 
   // Правая стена (обе комнаты) — серая штукатурка
   const right = new THREE.Mesh(new THREE.PlaneGeometry(TOTAL_LEN, H), wallRgtMat);
   right.rotation.y = -Math.PI / 2;
   right.position.set(IWR, wallY, ZC);
-  addHeightGradient(right.geometry, 0.55, 1);
+  addHeightGradient(right.geometry, 0.3, 1);
   scene.add(right);
 
   // Задняя торцевая — тот же старый кирпич, чуть темнее
@@ -1440,16 +1443,35 @@ function buildRoom() {
     texBrick("textures/brick_old.jpg", WID, H, 0x7a7a70),
   );
   back.position.set(0, wallY, Z_REAR);
-  addHeightGradient(back.geometry, 0.55, 1);
+  addHeightGradient(back.geometry, 0.3, 1);
   scene.add(back);
 
   // Лицевая стена — серая штукатурка (wall.jpg), ворота лежат на ней
   const faceMat = tex("textures/wall.jpg", WID, H, 0x9a9a92);
   faceMat.vertexColors = true;
+  faceMat.needsUpdate = true;
   const faceWall = new THREE.Mesh(new THREE.PlaneGeometry(WID + 0.06, H), faceMat);
   faceWall.position.set(0, wallY, Z_FRONT);
-  addHeightGradient(faceWall.geometry, 0.55, 1);
+  addHeightGradient(faceWall.geometry, 0.3, 1);
   scene.add(faceWall);
+
+  // Светодиодные ленты тёплого цвета на нижней дальней кромке полок над столом
+  const stripMat = new THREE.MeshBasicMaterial({ color: 0xffd9a0 });
+  [1.44].forEach((y) => {
+    const strip = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.012, 3.45), stripMat);
+    strip.position.set(1.63, y, -2.35);
+    scene.add(strip);
+    for (const z of [-3.3, -1.4]) {
+      const glow = new THREE.PointLight(0xffc078, 1.25, 4.0);
+      glow.position.set(1.42, y + 0.04, z);
+      scene.add(glow);
+    }
+  });
+
+  // Лампа из стены левее красного шкафа (у верстака)
+  const lampLight = new THREE.PointLight(0xffd8aa, 1.2, 6);
+  lampLight.position.set(0.4, 1.85, -5.7);
+  scene.add(lampLight);
 
   // Ворота-дверь: полигон с door.jpg, аккуратно по центру, не на всю стену
   const doorTex = new THREE.TextureLoader().load("textures/door.jpg");
@@ -1458,7 +1480,7 @@ function buildRoom() {
   const doorMat = new THREE.MeshLambertMaterial({
     map: doorTex,
     side: THREE.DoubleSide,
-    color: 0x9a9a9a, // чуть темнее
+    color: 0xe8e8e8,
   });
   const DW = 2.95;
   const DH = DW * (569 / 953); // ≈ 1.55 — пропорция текстуры, без искажений
@@ -1489,20 +1511,25 @@ function buildRoom() {
   // Перегородка с проёмом-аркой (та же wall.jpg, что у стен)
   const pw = IWR - ARCH_X1; // ширина пилона с каждой боковины
   const partMat = tex("textures/wall.jpg", pw, H, 0xadadad);
-  const lintelMat = tex("textures/wall.jpg", WID, H - ARCH_H, 0xadadad);
+  const lintelMat = tex("textures/wall.jpg", ARCH_X1 - ARCH_X0, H - ARCH_H, 0xadadad);
   partMat.vertexColors = true;
+  partMat.needsUpdate = true;
   lintelMat.vertexColors = true;
+  lintelMat.needsUpdate = true;
   const lp = new THREE.Mesh(new THREE.BoxGeometry(pw, H, T), partMat);
   lp.position.set((IWL + ARCH_X0) / 2, wallY, Z_PART);
-  addHeightGradient(lp.geometry, 0.55, 1);
+  addHeightGradient(lp.geometry, 0.34, 1);
   scene.add(lp);
   const rp = new THREE.Mesh(new THREE.BoxGeometry(pw, H, T), partMat);
   rp.position.set((ARCH_X1 + IWR) / 2, wallY, Z_PART);
-  addHeightGradient(rp.geometry, 0.55, 1);
+  addHeightGradient(rp.geometry, 0.34, 1);
   scene.add(rp);
-  const lin = new THREE.Mesh(new THREE.BoxGeometry(WID, H - ARCH_H, T), lintelMat);
+  const lin = new THREE.Mesh(
+    new THREE.BoxGeometry(ARCH_X1 - ARCH_X0 + T * 2, H - ARCH_H, T + 0.04),
+    lintelMat,
+  );
   lin.position.set(0, (H + ARCH_H) / 2, Z_PART);
-  addHeightGradient(lin.geometry, 0.55, 1);
+  addHeightGradient(lin.geometry, 0.34, 1);
   scene.add(lin);
 
   // тёмная отделка краёв проёма
@@ -1512,10 +1539,10 @@ function buildRoom() {
     metalness: 0.4,
   });
   const edgeL = new THREE.Mesh(new THREE.BoxGeometry(0.06, H, 0.05), trimMat);
-  edgeL.position.set(ARCH_X0 - 0.03, wallY, Z_PART);
+  edgeL.position.set(ARCH_X0 - 0.04, wallY, Z_PART);
   scene.add(edgeL);
   const edgeR = new THREE.Mesh(new THREE.BoxGeometry(0.06, H, 0.05), trimMat);
-  edgeR.position.set(ARCH_X1 + 0.03, wallY, Z_PART);
+  edgeR.position.set(ARCH_X1 + 0.04, wallY, Z_PART);
   scene.add(edgeR);
 
   // коллизии пилонов (проход — только через арку)
@@ -1678,10 +1705,33 @@ async function buildFurniture() {
       url,
       (tex) => {
         tex.colorSpace = THREE.SRGBColorSpace;
-        tex.anisotropy = 8;
+        const W = 512;
+        const H = 512;
+        const c = document.createElement("canvas");
+        c.width = W;
+        c.height = H;
+        const ctx = c.getContext("2d");
+        ctx.imageSmoothingEnabled = true;
+        ctx.drawImage(tex.image, 0, 0, W, H);
+        const vig = ctx.createRadialGradient(
+          W / 2,
+          H / 2,
+          Math.min(W, H) * 0.44,
+          W / 2,
+          H / 2,
+          Math.max(W, H) * 0.74,
+        );
+        vig.addColorStop(0, "rgba(0,0,0,0)");
+        vig.addColorStop(1, "rgba(30,30,30,0.5)");
+        ctx.fillStyle = vig;
+        ctx.fillRect(0, 0, W, H);
+        const canvasTex = new THREE.CanvasTexture(c);
+        canvasTex.colorSpace = THREE.SRGBColorSpace;
+        canvasTex.anisotropy = 8;
+        canvasTex.wrapS = canvasTex.wrapT = THREE.ClampToEdgeWrapping;
         m.material = new THREE.MeshLambertMaterial({
           color: 0xffffff,
-          map: tex,
+          map: canvasTex,
           roughness: 0.7,
           side: THREE.DoubleSide,
         });
@@ -1711,10 +1761,38 @@ async function buildFurniture() {
     );
   }
 
+  // Синий сейф — та же red.jpg, но hue-фильтром в синий
+  for (const n of ["сейф_корпус", "сейф_ручка"]) {
+    const m = regObjs.get(n);
+    if (!m) continue;
+    loader.load(
+      "textures/red.jpg",
+      (tex) => {
+        const cv = document.createElement("canvas");
+        cv.width = 512;
+        cv.height = 512;
+        const g = cv.getContext("2d");
+        g.filter = "hue-rotate(210deg) saturate(1.1) brightness(1.0)";
+        g.drawImage(tex.image, 0, 0, 512, 512);
+        const t = new THREE.CanvasTexture(cv);
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.anisotropy = 8;
+        t.wrapS = t.wrapT = THREE.RepeatWrapping;
+        t.repeat.set(1, 1);
+        m.material = new THREE.MeshLambertMaterial({ color: 0xffffff, map: t, roughness: 0.7 });
+        m.material.needsUpdate = true;
+      },
+      undefined,
+      () => {},
+    );
+  }
+
   // Деревянные текстуры: верстак, столешница, полки над ними и ножки
   const furnTex = {
     верстак_столешница: ["textures/verstak.jpg", 4, 1],
     столешница: ["textures/wood-light.jpg", 4, 1],
+    полка_под_верстак: ["textures/verstak.jpg", 3, 1],
+    полка_под_верстак_2: ["textures/verstak.jpg", 3, 1],
     полка_низ_стены: ["textures/tabletop.jpg", 2, 2],
     полка_верх_стены: ["textures/tabletop.jpg", 2, 2],
     барная_полка_1: ["textures/verstak.jpg", 2, 1],
@@ -1739,13 +1817,17 @@ async function buildFurniture() {
       (tex) => {
         if (root.isGroup) root.children.forEach((c) => c.material && applyTex(c, tex, ru, rv));
         else applyTex(root, tex, ru, rv);
+        if (n === "столешница") {
+          const ms = root.isGroup ? root.children : [root];
+          ms.forEach((m) => m.material && m.material.color.setHex(0xdbcdbe));
+        }
       },
       undefined,
       () => {},
     );
   }
 
-  // Стулья — все красные, текстура chair.jpg
+  // Стулья — все красные, текстура chair.jpg; кресло у верстака — обесцвеченная chair.jpg
   loader.load(
     "textures/chair.jpg",
     (tex) => {
@@ -1753,14 +1835,47 @@ async function buildFurniture() {
       tex.anisotropy = 8;
       tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
       tex.repeat.set(1, 1);
-      const applyChair = (m) => {
-        m.material = new THREE.MeshLambertMaterial({ color: 0xffffff, map: tex, roughness: 0.7 });
+      // Обесцвеченная копия для кресла
+      const grayTex = (() => {
+        const cv = document.createElement("canvas");
+        cv.width = 512;
+        cv.height = 512;
+        const g = cv.getContext("2d");
+        g.filter = "grayscale(1) brightness(1.6)";
+        g.drawImage(tex.image, 0, 0, 512, 512);
+        const t = new THREE.CanvasTexture(cv);
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.anisotropy = 8;
+        return t;
+      })();
+      const chairSatTex = (() => {
+        const cv = document.createElement("canvas");
+        cv.width = 512;
+        cv.height = 512;
+        const g = cv.getContext("2d");
+        g.filter = "saturate(0.7) brightness(1.1)";
+        g.drawImage(tex.image, 0, 0, 512, 512);
+        const t = new THREE.CanvasTexture(cv);
+        t.colorSpace = THREE.SRGBColorSpace;
+        t.anisotropy = 8;
+        return t;
+      })();
+      const applyChair = (m, color, map) => {
+        m.material = new THREE.MeshLambertMaterial({
+          color,
+          map,
+          roughness: 0.7,
+        });
         m.material.needsUpdate = true;
       };
       for (const [n, root] of regObjs) {
         if (!n.startsWith("стул_") || !root) continue;
-        if (root.isGroup) root.children.forEach((c) => c.material && applyChair(c));
-        else if (root.material) applyChair(root);
+        const isArmchair = n === "стул_табл_1" || n === "стул_табл_2";
+        const isStool = !isArmchair && root.isGroup && root.children.length === 5; // без спинки
+        const color = isArmchair ? 0xf2f2f2 : isStool ? 0xb8b8b8 : 0xffffff;
+        const map = isArmchair ? grayTex : chairSatTex;
+        if (root.isGroup) root.children.forEach((c) => c.material && applyChair(c, color, map));
+        else if (root.material) applyChair(root, color, map);
       }
     },
     undefined,
