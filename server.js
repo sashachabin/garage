@@ -96,6 +96,11 @@ wss.on("connection", (ws) => {
     .filter((c) => c.ws !== ws && c.state)
     .map((c) => ({ id: c.id, nick: c.nick, state: c.state }));
   ws.send(JSON.stringify({ type: "hello", id, nick, peers, radio: radioState }));
+  const joinTs = Date.now();
+  for (const [otherWs] of clients) {
+    if (otherWs !== ws && otherWs.readyState === 1)
+      otherWs.send(JSON.stringify({ type: "join", id, nick, ts: joinTs }));
+  }
   console.log(`+ ${nick} (${id}), всего: ${clients.size}`);
 
   ws.on("message", (raw) => {
@@ -111,7 +116,7 @@ wss.on("connection", (ws) => {
     switch (msg.type) {
       case "state":
         client.state = msg.state;
-        const out = JSON.stringify({ type: "state", id, state: msg.state });
+        const out = JSON.stringify({ type: "state", id, state: msg.state, nick: client.nick });
         for (const [otherWs, other] of clients) {
           if (otherWs !== ws && otherWs.readyState === 1) otherWs.send(out);
         }
@@ -126,6 +131,14 @@ wss.on("connection", (ws) => {
           if (otherWs.readyState === 1) otherWs.send(outC);
         }
         console.log(`[чат] ${client.nick}: ${text}`);
+        break;
+      }
+
+      case "death": {
+        const outD = JSON.stringify({ type: "event", kind: "death", who: client.nick, killer: msg.killer || null, ts: Date.now() });
+        for (const [ow] of clients) {
+          if (ow.readyState === 1) ow.send(outD);
+        }
         break;
       }
 
@@ -175,7 +188,7 @@ wss.on("connection", (ws) => {
 
   ws.on("close", () => {
     clients.delete(ws);
-    const out = JSON.stringify({ type: "leave", id });
+    const out = JSON.stringify({ type: "leave", id, nick, ts: Date.now() });
     for (const [other] of clients) {
       if (other.readyState === 1) other.send(out);
     }

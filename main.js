@@ -346,15 +346,24 @@ function connectNet() {
     } else if (msg.type === "state") {
       const p = remotePlayers.get(msg.id);
       if (!p) spawnRemotePlayer(msg);
-      else updateRemotePlayer(p, msg.state);
+      else {
+        updateRemotePlayer(p, msg.state);
+        if (msg.nick && p.nick !== msg.nick) p.nick = msg.nick;
+      }
     } else if (msg.type === "leave") {
       removeRemotePlayer(msg.id);
+      pushChatSystem(`${msg.nick || "Кто-то"} вышел`);
+    } else if (msg.type === "join") {
+      pushChatSystem(`${msg.nick || "Кто-то"} вошёл`);
     } else if (msg.type === "chat") {
       pushChatMessage(msg.nick, msg.text);
     } else if (msg.type === "signal") {
       handleSignal(msg);
     } else if (msg.type === "knock") {
       onKnockReceived(msg);
+    } else if (msg.type === "event" && msg.kind === "death") {
+      if (msg.killer && msg.killer !== msg.who) pushChatSystem(`${msg.killer} избил ${msg.who} — мы его потеряли`);
+      else pushChatSystem(`${msg.who} — мы его потеряли`);
     } else if (msg.type === "radio") {
       applyRadioState(msg.station, msg.volume);
     }
@@ -405,6 +414,13 @@ function syncSend(dt) {
     ws.send(JSON.stringify({ type: "state", state: ownState() }));
   }
 }
+// Фоновая синхронизация: даже если вкладка неактивна (RAF заморожен),
+// продолжаем слать своё состояние — другие увидят смерть / 0 HP у афк
+setInterval(() => {
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: "state", state: ownState() }));
+  }
+}, 400);
 
 function idHash(id) {
   let h = 0;
@@ -475,6 +491,7 @@ function spawnRemotePlayer(msg) {
     `<div class="pl-hp"><i style="width:100%"></i><span class="pl-hpnum">100 HP</span></div>`;
   document.body.appendChild(label);
   entry.label = label;
+  entry.bubble = makeChatBubble();
   remotePlayers.set(id, entry);
   updateRemotePlayer(entry, msg.state);
   renderPlayerList();
@@ -505,6 +522,7 @@ function updateRemotePlayer(p, st) {
   p.animT = st.at;
   if (st.hp !== undefined) p.hp = st.hp;
   if (st.dead !== undefined) p.dead = st.dead;
+  if (p.dead) p.hp = 0;
   if (st.kick) p.kickT = 0.4; // запускаем пинок у удалённого игрока
   if (st.pt) p.punchT = 0.18; // и удар рукой
   if (st.hy !== undefined) p.headY = st.hy;
@@ -517,6 +535,7 @@ function removeRemotePlayer(id) {
   if (p) {
     scene.remove(p.group);
     if (p.label) p.label.remove();
+    if (p.bubble) p.bubble.remove();
     remotePlayers.delete(id);
   }
   const pc = radioPeers.get(id);
@@ -693,6 +712,7 @@ function buildLocalLabel() {
     `<div class="pl-hp"><i style="width:100%"></i><span class="pl-hpnum">100 HP</span></div>`;
   document.body.appendChild(label);
   localLabel = label;
+  localBubble = makeChatBubble();
   console.log("✅ Локальная метка создана:", displayName);
 }
 
@@ -726,6 +746,16 @@ function updatePlayerLabels() {
       localLabel.style.transform = "translate(-50%, -100%)";
     }
 
+    // Чат-пузырь — чуть выше метки с ником
+    if (localBubble) {
+      const vis = localBubble.classList.contains("show") && v.z <= 1;
+      localBubble.style.display = vis ? "block" : "none";
+      if (vis) {
+        localBubble.style.left = x + "px";
+        localBubble.style.top = y - 58 + "px";
+      }
+    }
+
     // Обновляем HP
     const hpFill = localLabel.querySelector(".pl-hp i");
     const hpNum = localLabel.querySelector(".pl-hpnum");
@@ -757,9 +787,19 @@ function updatePlayerLabels() {
       entry.label.style.transform = "translate(-50%, -100%)";
     }
 
+    // Чат-пузырь удалённого игрока — чуть выше метки с ником
+    if (entry.bubble) {
+      const vis = entry.bubble.classList.contains("show") && v.z <= 1;
+      entry.bubble.style.display = vis ? "block" : "none";
+      if (vis) {
+        entry.bubble.style.left = x + "px";
+        entry.bubble.style.top = y - 58 + "px";
+      }
+    }
+
     const hpFill = entry.label.querySelector(".pl-hp i");
     const hpNum = entry.label.querySelector(".pl-hpnum");
-    const hpV = Math.max(0, Math.min(100, entry.hp || 100));
+    const hpV = Math.max(0, Math.min(100, entry.hp ?? 100));
     if (hpFill) {
       hpFill.style.width = hpV + "%";
       const color = hpV > 55 ? "#7ddb4e" : hpV > 25 ? "#ffb13c" : "#ff4d3d";
@@ -779,6 +819,26 @@ function escapeHtml(s) {
     /[&<>"']/g,
     (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch],
   );
+}
+
+// Чат-пузырь над головой игрока: показываем текст сообщения на несколько секунд
+function makeChatBubble() {
+  const b = document.createElement("div");
+  b.className = "chat-bubble";
+  document.body.appendChild(b);
+  return b;
+}
+function showChatBubble(bubble, text) {
+  if (!bubble) return;
+  bubble.textContent = text;
+  bubble.classList.add("show");
+  clearTimeout(bubble._t);
+  bubble._t = setTimeout(() => bubble.classList.remove("show"), 4000);
+}
+function bubbleFor(nick) {
+  if (nick === myNick) return localBubble;
+  for (const [, e] of remotePlayers) if (e.nick === nick) return e.bubble;
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -813,10 +873,10 @@ function submitChatText() {
   const inp = document.getElementById("chatinput");
   const text = (inp.value || "").trim();
   chatBuffer = "";
+  if (inp) inp.value = "";
   closeChat();
   if (!text) return;
   if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "chat", text }));
-  pushChatMessage(myNick, text);
 }
 
 function pushChatMessage(nick, text) {
@@ -829,13 +889,15 @@ function pushChatMessage(nick, text) {
   log.appendChild(div);
   while (log.childNodes.length > 60) log.removeChild(log.firstChild);
   log.scrollTop = log.scrollHeight;
+  showChatBubble(bubbleFor(nick), text);
 }
 function pushChatSystem(text) {
   const log = document.getElementById("chatlog");
   if (!log) return;
   const div = document.createElement("div");
   div.className = "csys";
-  div.textContent = text;
+  const t = new Date().toLocaleTimeString("ru-RU", { hour: "2-digit", minute: "2-digit" });
+  div.innerHTML = `<span class="ct">${t}</span> ${escapeHtml(text)}`;
   log.appendChild(div);
   while (log.childNodes.length > 60) log.removeChild(log.firstChild);
   log.scrollTop = log.scrollHeight;
@@ -1052,15 +1114,17 @@ function d2dNorm(id) {
 let hp = 100; // здоровье (броня и деньги — «по фану» убраны)
 let dead = false,
   deadT = 0; // смерть: флаг + таймер до возрождения
+let lastKiller = null; // кто последним ударил (для события смерти)
 let localTint = 0; // покраснение собственного персонажа при ударе
 let localLabel = null; // метка над своим персонажем
+let localBubble = null; // чат-пузырь над головой своего персонажа
 const SPAWN_POS = { x: -0.5, z: 1.2 };
 
 function tryPunch() {
   // Интернет/мигание: без кулдауна — каждый клик следующий удар по ротации
   if (sitting >= 0 || chatOpen || dead) return;
   punchCool = 0.15; // защита от спама на сервер
-  const fwd = new THREE.Vector3(-Math.sin(rotYaw), 0, -Math.cos(rotYaw));
+  const fwd = new THREE.Vector3(Math.sin(rotYaw), 0, Math.cos(rotYaw)); // лицо персонажа
   // Ротация: левая рука → правая рука → левая нога → правая нога → …
   const st = strikeSeq % 4;
   strikeSeq++;
@@ -1078,7 +1142,7 @@ function tryPunch() {
   let bestId = null,
     bestScore = -Infinity;
   for (const [id2, entry] of remotePlayers) {
-    if (!entry.group) continue;
+    if (!entry.group || entry.dead) continue;
     const dvec = new THREE.Vector3(
       entry.group.position.x - character.position.x,
       0,
@@ -1086,10 +1150,14 @@ function tryPunch() {
     );
     const d2d = dvec.length();
     if (d2d < 1.5) {
-      const score = dvec.dot(fwd) - d2d * 0.6; // передний конус
-      if (score > bestScore) {
-        bestScore = score;
-        bestId = id2;
+      dvec.normalize();
+      const dot = dvec.dot(fwd); // бьём только если цель спереди (по корпусу)
+      if (dot > 0.1) {
+        const score = dot - d2d * 0.6; // передний конус
+        if (score > bestScore) {
+          bestScore = score;
+          bestId = id2;
+        }
       }
     }
   }
@@ -1100,13 +1168,6 @@ function tryPunch() {
     const te = remotePlayers.get(bestId).group.position;
     const td = Math.hypot(te.x - character.position.x, te.z - character.position.z);
     punchHi = td < 0.85 ? 1 : 0;
-    // корпус доворачивается к врагу в момент удара
-    const want = Math.atan2(-(te.x - character.position.x), -(te.z - character.position.z));
-    let dY = want - rotYaw;
-    while (dY > Math.PI) dY -= 2 * Math.PI;
-    while (dY < -Math.PI) dY += 2 * Math.PI;
-    rotYaw += dY * 0.75; // резкий доворот куда смотрим
-    rotVel = 0;
     // короткий выпад вперёд для достижения цели
     const dirN = d2dNorm(bestId);
     if (dirN) {
@@ -1150,6 +1211,9 @@ function die() {
   deadT = 3.2;
   velSim.px = velSim.pz = velSim.vx = velSim.vz = 0;
   sfx.death();
+  if (ws && ws.readyState === 1) {
+    ws.send(JSON.stringify({ type: "death", killer: lastKiller || null }));
+  }
 }
 
 function onKnockReceived(msg) {
@@ -1168,6 +1232,7 @@ function onKnockReceived(msg) {
   recoilT = 0.28;
   recoilNx = dx * rl;
   recoilNz = dz * rl;
+  lastKiller = msg.nick || null;
   takeHit(k > 1 ? 22 : 16);
 }
 
@@ -1175,6 +1240,7 @@ function respawn() {
   dead = false;
   deadT = 0;
   hp = 100;
+  lastKiller = null;
   character.position.set(SPAWN_POS.x, 0, SPAWN_POS.z);
   character.rotation.y = rotYaw = 0;
   rotVel = 0;
@@ -1223,22 +1289,27 @@ function init() {
   connectNet();
   sfx.ambient(true); // лёгкий гул гаража (звук начнётся после первого клика)
   initGarageRadio();
+  pushChatSystem("Добро пожаловать в гараж! T — чат, E — сесть/встать, V — рация");
 
   addEventListener("keydown", (e) => {
     unlock(); // разблокировка аудио первым вводом
+    if (chatOpen) {
+      // Пока печатаем в чате — игровые клавиши не работают
+      if (e.code === "Enter") {
+        e.preventDefault();
+        submitChatText();
+      } else if (e.code === "Escape") {
+        e.preventDefault();
+        closeChat();
+      }
+      return;
+    }
     keys[e.code] = true;
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code))
       e.preventDefault();
     if (e.code === "KeyT" && !e.repeat) toggleChat();
     if (e.code === "KeyV" && !e.repeat) radioStart();
     if (e.code === "KeyF" && !e.repeat) tryPunch();
-    if (e.code === "Enter" && chatOpen) {
-      e.preventDefault();
-      submitChatText();
-    }
-    if (e.code === "Escape" && chatOpen) {
-      closeChat();
-    }
     if (e.code === "Escape" && radioMenuOpen) {
       closeRadioMenu();
     }
@@ -2351,7 +2422,7 @@ function updatePlayer(dt) {
   if (chatOpen) return; // набор текста — игрок не двигается
   if (radioMenuOpen) return; // меню радио — управление заблокировано
 
-  // Обработка смерти: таймер до возрождения, падение
+  // Обработка смерти: ждём 3 секунды (в неактивной вкладке RAF заморожен — афк не возрождается)
   if (dead) {
     deadT -= dt;
     if (deadT <= 0) respawn();
