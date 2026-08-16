@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Сцена гаража — /debug</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, sans-serif; background: #14161a; color: #eee; }
+  #view { position: absolute; inset: 0; }
+  #view canvas { display: block; }
+  #toolbar {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 5; height: 42px;
+    display: flex; align-items: center; gap: 6px; padding: 0 10px;
+    background: rgba(14,16,20,.9); border-bottom: 1px solid rgba(255,255,255,.15);
+    font-size: 12px; flex-wrap: wrap;
+  }
+  #toolbar button {
+    background: rgba(255,255,255,.08); color: #fff; border: 1px solid rgba(255,255,255,.18);
+    border-radius: 6px; padding: 5px 10px; font-size: 12px; cursor: pointer;
+  }
+  #toolbar button:hover { background: rgba(255,255,255,.2); }
+  #toolbar button.on { background: rgba(255,200,60,.2); border-color: #ffd479; color: #ffd479; }
+  #toolbar .sep { width: 1px; height: 22px; background: rgba(255,255,255,.2); margin: 0 4px; }
+  #toolbar #cnt { color: #9fe39f; }
+  #pane {
+    position: fixed; top: 50px; left: 10px; bottom: 44px; z-index: 4; width: 300px;
+    display: flex; flex-direction: column; gap: 8px;
+  }
+  .panel {
+    background: rgba(14,16,20,.92); border: 1px solid rgba(255,255,255,.15);
+    border-radius: 10px; padding: 8px; overflow-y: auto;
+  }
+  #list { flex: 0 0 auto; max-height: 45%; }
+  #list .it { cursor: pointer; padding: 2px 6px; border-radius: 4px; font: 12px/1.6 monospace; display: flex; justify-content: space-between; gap: 6px; }
+  #list .it:hover { background: rgba(255,255,255,.08); }
+  #list .it.sel { background: rgba(255,200,60,.22); color: #ffd479; }
+  #list .it .coo { color: #8a8a8a; }
+  #json { flex: 1; min-height: 260px; display: flex; flex-direction: column; }
+  #json h4 { margin: 2px 0 6px; font-size: 12px; letter-spacing: 2px; color: #ffd479; }
+  #json .empty { color: #667; font: 12px monospace; padding: 6px 0; }
+  #json textarea {
+    flex: 1; width: 100%; box-sizing: border-box; resize: none;
+    background: #0d0f13; color: #9fe39f; border: 1px solid rgba(255,255,255,.2);
+    border-radius: 8px; padding: 8px; font: 11px/1.5 monospace; white-space: pre;
+  }
+  #json .btns { display: flex; gap: 6px; margin-top: 6px; }
+  #json button { flex: 1; background: rgba(255,255,255,.08); color: #fff; border: 1px solid rgba(255,255,255,.18); border-radius: 6px; padding: 5px; font-size: 12px; cursor: pointer; }
+  #json button:hover { background: rgba(255,255,255,.2); }
+  #status {
+    position: fixed; left: 12px; bottom: 12px; z-index: 6;
+    background: rgba(0,0,0,.65); color: #ffe08a; font: 12px/1.5 monospace;
+    padding: 6px 10px; border-radius: 8px; pointer-events: none; white-space: pre;
+  }
+  #hint { position: fixed; right: 12px; bottom: 12px; z-index: 6; color: #667; font: 11px monospace; text-align: right; pointer-events: none; }
+</style>
+</head>
+<body>
+<div id="view"></div>
+
+<div id="toolbar">
+  <b style="color:#ffd479; letter-spacing:2px;">🏠 СЦЕНА ГАРАЖА</b>
+  <span class="sep"></span>
+  <button id="btnReload">🔄 Перечитать</button>
+  <button id="btnCopyScene">📋 Сцена (JSON)</button>
+  <button id="btnGrid" class="on">Сетка</button>
+  <span class="sep"></span>
+  <span id="cnt">…</span>
+</div>
+
+<div id="pane">
+  <div class="panel" id="list"><div style="color:#667; padding:4px;">Загрузка…</div></div>
+  <div class="panel" id="json">
+    <h4>JSON ОБЪЕКТА</h4>
+    <div class="empty" id="jsonEmpty">Кликни по объекту в 3D или списке — здесь появится его JSON</div>
+    <textarea id="jsonText" spellcheck="false" style="display:none"></textarea>
+    <div class="btns" style="display:none" id="jsonBtns">
+      <button id="btnCopy">Копировать</button>
+      <button id="btnClear">Снять выбор</button>
+    </div>
+  </div>
+</div>
+
+<div id="status">Загрузка сцены…</div>
+<div id="hint">чтение только — объекты лежат в scene.json<br/>клик — выбрать · G — сетка<br/>правь scene.json и жми «Перечитать»</div>
+
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+  }
+}
+</script>
+<script type="module" src="debug.js"></script>
+</body>
+</html>
