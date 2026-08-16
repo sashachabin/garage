@@ -13,15 +13,15 @@ import { sfx, unlock } from "./sfx.js";
 // направленные споты рабочей зоны вдоль правой стены + тёплый свет в торце.
 // -------------------------------------------------------------------------------
 
-const WID = 3.35;
+const WID = 3.6;
 const HALF = WID / 2;
 const IWL = -HALF;
 const IWR = HALF;
 const T = 0.12; // толщина стен и перегородки
 const H = 2.6; // потолок чуть повыше
 
-const ROOM_REAR_L = 5.91; // дальнее помещение (мастерская)
-const ROOM_FRONT_L = 5.44; // ближнее помещение (ворота)
+const ROOM_REAR_L = 6.21; // дальнее помещение (мастерская)
+const ROOM_FRONT_L = 5.74; // ближнее помещение (ворота)
 const Z_REAR = -ROOM_REAR_L; // задняя торцевая стена
 const Z_PART = 0; // ось перегородки
 const Z_FRONT = Z_PART + T + ROOM_FRONT_L; // лицевая стена (5.56)
@@ -255,6 +255,7 @@ function updateGarageRadio(dt) {
 }
 
 const colliders = [];
+const cameraColliders = []; // полки/стеллажи: блокируют камеру только на своей высоте
 const RADIUS = 0.26; // чуть больше — персонаж пошире
 
 // Реестр построенных из scene.json объектов (для текстур постеров и пр.)
@@ -605,7 +606,7 @@ function updateRemoteAnim(entry, dt) {
     P.le = -0.6;
     P.re = -0.3;
   } else if (entry.sitting) {
-    // сидячая поза
+    // сидячая поза: поджатые ноги
     P.ll = -1.25;
     P.rl = -1.25;
     P.lk = 1.25;
@@ -1320,7 +1321,7 @@ function buildLights() {
   scene.add(glow);
 
   // Направленные споты размещены прямо на левой кирпичной стене (IWL)
-  const taskZ = [-2.1, -4.3];
+  const taskZ = [-2.2, -4.52];
   const spotMat = new THREE.MeshLambertMaterial({ color: 0x9fa3a8 });
   for (const z of taskZ) {
     const sp = new THREE.PointLight(0xffe6c0, 2.2, 5.2, 1.8);
@@ -1386,7 +1387,7 @@ function buildRoom() {
     geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   };
 
-  const floorMat = tex("textures/floor_wood.jpg", WID + 0.2, TOTAL_LEN + 0.6, 0x555555);
+  const floorMat = tex("textures/floor_wood.jpg", WID + 0.2, TOTAL_LEN + 0.6, 0x6e6e6e);
   const ceilMat = tex("textures/wall.jpg", WID / 2, TOTAL_LEN / 2, 0xc2c2c2);
   const slabMat = new THREE.MeshLambertMaterial({ color: 0x8d8d8d });
   const grayMat = new THREE.MeshLambertMaterial({ color: 0x8d8d8d, side: THREE.DoubleSide });
@@ -1455,23 +1456,19 @@ function buildRoom() {
   addHeightGradient(faceWall.geometry, 0.3, 1);
   scene.add(faceWall);
 
-  // Светодиодные ленты тёплого цвета на нижней дальней кромке полок над столом
-  const stripMat = new THREE.MeshBasicMaterial({ color: 0xffd9a0 });
-  [1.44].forEach((y) => {
-    const strip = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.012, 3.45), stripMat);
-    strip.position.set(1.63, y, -2.35);
-    scene.add(strip);
-    for (const z of [-3.3, -1.4]) {
-      const glow = new THREE.PointLight(0xffc078, 1.25, 4.0);
-      glow.position.set(1.42, y + 0.04, z);
-      scene.add(glow);
-    }
-  });
+  // Мягкое освещение у компьютеров (без светящейся ленты)
+  for (const z of [-3.3, -1.4]) {
+    const glow = new THREE.PointLight(0xffc078, 1.25, 4.0);
+    glow.position.set(1.62, 1.48, z);
+    scene.add(glow);
+  }
 
   // Лампа из стены левее красного шкафа (у верстака)
-  const lampLight = new THREE.PointLight(0xffd8aa, 1.2, 6);
-  lampLight.position.set(0.4, 1.85, -5.7);
+  const lampLight = new THREE.SpotLight(0xffd8aa, 3.5, 7, 0.65, 0.45, 1.0);
+  lampLight.position.set(0.4, 1.85, -6.1);
+  lampLight.target.position.set(0.4, 0.95, -5.9);
   scene.add(lampLight);
+  scene.add(lampLight.target);
 
   // Ворота-дверь: полигон с door.jpg, аккуратно по центру, не на всю стену
   const doorTex = new THREE.TextureLoader().load("textures/door.jpg");
@@ -1640,7 +1637,15 @@ async function buildFurniture() {
       z = d.pos[2];
     if (n.startsWith("стул_")) {
       const ry = ((d.rot_deg && d.rot_deg[1]) || 0) * D2R;
-      root.userData.seat = { pos: [x, z], yaw: n === "стул_табл_1" ? Math.PI / 2 : ry };
+      const seatC = (d.children || []).find(
+        (c) => (c.size || [0, 0, 0])[0] >= 0.4 && (c.size || [0, 0, 0])[2] >= 0.4 && (c.size || [0, 0, 0])[1] < 0.1,
+      );
+      root.userData.seat = {
+        pos: [x, z],
+        yaw: n === "стул_табл_1" ? Math.PI / 2 : ry,
+        h: seatC ? seatC.pos[1] : 0.42,
+        table: n.startsWith("стул_табл"),
+      };
       colliders.push({ minX: x - 0.3, maxX: x + 0.3, minZ: z - 0.3, maxZ: z + 0.3 });
       chairSeats.push(root);
     } else if (n === "столешница") {
@@ -1682,6 +1687,18 @@ async function buildFurniture() {
     } else if (n === "радио_корпус") {
       GARAGE_RADIO_POS.x = x + 0.12;
       GARAGE_RADIO_POS.z = z;
+    } else if (n.startsWith("полка_")) {
+      // полки и стеллажи: блокируют камеру только на высоте полки
+      const w = d.size[0],
+        l = d.size[2];
+      cameraColliders.push({
+        minX: x - w / 2 - 0.04,
+        maxX: x + w / 2 + 0.04,
+        minZ: z - l / 2 - 0.04,
+        maxZ: z + l / 2 + 0.04,
+        yLow: d.pos[1] - d.size[1] / 2 - 0.12,
+        yHigh: d.pos[1] + d.size[1] / 2 + 0.12,
+      });
     }
     reg(n, root);
   }
@@ -2061,11 +2078,11 @@ function buildCharacter() {
 // spring-скорость, движение относительно камеры, spring-поворот, прыжок)
 // ---------------------------------------------------------------------------
 const MOVE_WALK = 1.6,
-  MOVE_RUN = 3.8; // целевые скорости spring: по умолчанию шаг, Shift — бег
-const VEL_MASS = 6,
-  VEL_DAMP = 0.7; // пружина скорости: почти без инерции
-const ROT_MASS = 1.6,
-  ROT_DAMP = 0.7; // spring поворота модели
+  MOVE_RUN = 3.3; // целевые скорости spring: по умолчанию шаг, Shift — бег
+const VEL_MASS = 3,
+  VEL_DAMP = 0.8; // пружина скорости: почти без инерции
+const ROT_MASS = 1.2,
+  ROT_DAMP = 0.78; // spring поворота модели
 const JUMP_SPEED = 4.8,
   GRAV = 9.8; // прыжок + гравитация
 const FLOOR_Y = 0;
@@ -2083,8 +2100,8 @@ let crouched = false,
   eWasDown = false;
 let camTheta = -0.22,
   camPhi = 0,
-  camRadius = 1.3,
-  camTargetRadius = 1.3; // старт: камера по центру (на уровне глаз), небольшой градус по X
+  camRadius = 1.7,
+  camTargetRadius = 1.7; // старт: камера по центру (на уровне глаз), небольшой градус по X
 let lastMX = 0,
   lastMY = 0;
 
@@ -2159,24 +2176,18 @@ function updatePlayer(dt) {
     velTarget.x = 0;
     velTarget.z = 0;
   }
-  const accX = (velTarget.x - velSim.px) / VEL_MASS;
-  const accZ = (velTarget.z - velSim.pz) / VEL_MASS;
-  velSim.vx = (velSim.vx + accX) * VEL_DAMP;
-  velSim.vz = (velSim.vz + accZ) * VEL_DAMP;
-  velSim.px += velSim.vx;
-  velSim.pz += velSim.vz;
+  // Быстрый плавный разгон/торможение (без spring-осцилляции):
+  // при отпускании клавиш скорость мягко сходит на ноль, анимация ходьбы не дёргается
+  const kMove = Math.min(1, 16 * dt);
+  velSim.px += (velTarget.x - velSim.px) * kMove;
+  velSim.pz += (velTarget.z - velSim.pz) * kMove;
 
-  // Поворот модели к направлению движения (spring по углу Y)
   if (l > 0.01) {
     const rotTarget = Math.atan2(velSim.px, velSim.pz);
     let dA = rotTarget - rotYaw;
     while (dA > Math.PI) dA -= 2 * Math.PI;
     while (dA < -Math.PI) dA += 2 * Math.PI;
-    rotVel += dA / ROT_MASS;
-    rotVel *= ROT_DAMP;
-    rotYaw += rotVel;
-  } else {
-    rotVel = 0;
+    rotYaw += dA * Math.min(1, 10 * dt); // ~100 мс плавный доворот
   }
   character.rotation.y = rotYaw + (onGround ? 0 : 0);
 
@@ -2253,9 +2264,9 @@ function toggleSit() {
   sitPreSit.x = character.position.x;
   sitPreSit.z = character.position.z;
   const p = chairSeats[best].position;
+  const seat = chairSeats[best].userData.seat || {};
   character.position.set(p.x, -0.12, p.z);
-  const seatYaw =
-    (chairSeats[best].userData.seat && chairSeats[best].userData.seat.yaw) ?? Math.PI / 2;
+  const seatYaw = seat.yaw ?? Math.PI / 2;
   character.rotation.y = rotYaw = seatYaw; // лицом по оси стула
   rotVel = 0;
   // поза подхватится плавно через сглаживание в updateAnim
@@ -2325,18 +2336,30 @@ function updateAnim(dt) {
     P.lz = 0;
     P.rz = 0;
   } else if (sitting >= 0) {
-    // Сидим на стуле: согнутые ноги и локти, корпус чуть вперёд
+    // Сидим на стуле: поджатые ноги и локти, корпус чуть вперёд
+    const atTable = chairSeats[sitting]?.userData.seat?.table;
     P.ll = -1.25;
     P.rl = -1.25;
     P.lk = 1.25;
     P.rk = 1.25;
-    P.la = -0.7;
-    P.ra = -0.7;
-    P.le = -1.2;
-    P.re = -1.2;
-    P.tx = 0.06;
-    P.lz = 0.08;
-    P.rz = -0.08;
+    if (atTable) {
+      // за столом: руки вытянуты вперёд, кисти лежат на столешнице
+      P.la = -1.15;
+      P.ra = -1.15;
+      P.le = 0.1;
+      P.re = 0.1;
+      P.lz = 0;
+      P.rz = 0;
+    } else {
+      // без стола: руки опущены, кисти на коленях (не на воздухе)
+      P.la = -0.3;
+      P.ra = -0.3;
+      P.le = -0.5;
+      P.re = -0.5;
+      P.lz = 0;
+      P.rz = 0;
+    }
+    P.tx = 0;
   } else {
     // Плавно меняем амплитуду приседа
     crouch += ((crouched ? 1 : 0) - crouch) * Math.min(1, 14 * dt);
@@ -2560,7 +2583,7 @@ function updateAnim(dt) {
     }
     prevHeadMode = mode;
     if (mode === "move") {
-      headWorld = damp(headWorld, facing, 10, dt);
+      headWorld = facing;
     } else if (mode === "back") {
       mouseAcc = THREE.MathUtils.clamp(mouseAcc + (camTheta - prevTheta) * 1.5, -1.2, 1.2);
       headWorld = damp(headWorld, facing + mouseAcc, 12, dt);
@@ -2613,9 +2636,9 @@ function damp(cur, tgt, rate, dt) {
 }
 
 // Чуть шире и ниже: присемистая фигура, ширина/глубина преобладают над ростом
-const CHAR_X = 0.78;
-const CHAR_Y = 0.58;
-const CHAR_Z = 0.78;
+const CHAR_X = 0.86;
+const CHAR_Y = 0.64;
+const CHAR_Z = 0.86;
 
 let camPos = new THREE.Vector3(0, 1.7, Z_FRONT - 3);
 let camLook = new THREE.Vector3();
@@ -2639,6 +2662,50 @@ function updateCamera(dt) {
         rEff * Math.cos(camTheta) * Math.cos(camPhi),
       ),
     );
+  // Коллизия камеры с мебелью: если цель внутри объекта — приближаем камеру
+  // к персонажу вдоль направления взгляда (зум остаётся в camTargetRadius)
+  {
+    const camDir = targetPos.clone().sub(eye);
+    let len = camDir.length();
+    if (len > 0.001) {
+      const dx = camDir.x / len,
+        dz = camDir.z / len;
+      const CAM_R = 0.15;
+      for (let i = 0; i < 10; i++) {
+        let hit = false;
+        for (const o of colliders) {
+          if (
+            targetPos.x + CAM_R > o.minX &&
+            targetPos.x - CAM_R < o.maxX &&
+            targetPos.z + CAM_R > o.minZ &&
+            targetPos.z - CAM_R < o.maxZ
+          ) {
+            hit = true;
+            break;
+          }
+        }
+        if (!hit) {
+          for (const o of cameraColliders) {
+            if (
+              targetPos.y >= o.yLow &&
+              targetPos.y <= o.yHigh &&
+              targetPos.x + CAM_R > o.minX &&
+              targetPos.x - CAM_R < o.maxX &&
+              targetPos.z + CAM_R > o.minZ &&
+              targetPos.z - CAM_R < o.maxZ
+            ) {
+              hit = true;
+              break;
+            }
+          }
+        }
+        if (!hit) break;
+        len *= 0.82;
+        targetPos.x = eye.x + dx * len;
+        targetPos.z = eye.z + dz * len;
+      }
+    }
+  }
   camPos.lerp(targetPos, 1 - Math.pow(0.02, dt));
   // Живость камеры: лёгкое дыхание при сидении, покачивание на ходу
   if (sitting >= 0) camPos.y += Math.sin(performance.now() * 0.0022) * 0.005;
