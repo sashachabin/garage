@@ -1033,6 +1033,8 @@ let mouseAcc = 0; // накопитель мыши (режим «спина»)
 let prevTheta = Math.PI / 2; // camTheta на прошлом кадре (для скорости мыши)
 let prevHeadMode = ""; // прошлый режим головы: move | chest | back
 let lastCamTheta = null; // прошлый угол камеры (для лёгкого наклона корпуса)
+let camPulse = 0,
+  camPulseTgt = 0; // отдача камеры: чуть отходит при ударах/движении и возвращается
 
 // единичный вектор по земле к игроку по id (если класс у него есть и он близок)
 function d2dNorm(id) {
@@ -1059,6 +1061,7 @@ function tryPunch() {
   // Ротация: левая рука → правая рука → левая нога → правая нога → …
   const st = strikeSeq % 4;
   strikeSeq++;
+  camPulseTgt = Math.min(1, camPulseTgt + 0.5);
   const kick = st >= 2;
   if (kick) {
     kickAnim = 0.4;
@@ -1961,7 +1964,8 @@ let crouched = false,
   eWasDown = false;
 let camTheta = -0.22,
   camPhi = 0,
-  camRadius = 1.3; // старт: камера по центру (на уровне глаз), небольшой градус по X
+  camRadius = 1.3,
+  camTargetRadius = 1.3; // старт: камера по центру (на уровне глаз), небольшой градус по X
 let lastMX = 0,
   lastMY = 0;
 
@@ -2491,13 +2495,20 @@ let camLook = new THREE.Vector3();
 function updateCamera(dt) {
   const eyeH = 1.84 * character.scale.y; // глаза: локальная y черепа × масштаб (присев — ниже)
   const eye = character.position.clone().add(new THREE.Vector3(0, eyeH, 0));
+  // Плавный зум: радиус догоняет цель по кадрам
+  camRadius = damp(camRadius, camTargetRadius, 12, dt);
+  // Мягкий «возврат» камеры: при ударах и движении камера чуть отходит и плавно возвращается
+  camPulse = damp(camPulse, camPulseTgt, 5, dt);
+  camPulseTgt *= Math.exp(-2.5 * dt);
+  if (moveSpeed > 0.05) camPulseTgt = Math.max(camPulseTgt, 0.35);
+  const rEff = camRadius * (1 + camPulse * 0.05);
   const targetPos = eye
     .clone()
     .add(
       new THREE.Vector3(
-        camRadius * Math.sin(camTheta) * Math.cos(camPhi),
-        camRadius * Math.sin(camPhi),
-        camRadius * Math.cos(camTheta) * Math.cos(camPhi),
+        rEff * Math.sin(camTheta) * Math.cos(camPhi),
+        rEff * Math.sin(camPhi),
+        rEff * Math.cos(camTheta) * Math.cos(camPhi),
       ),
     );
   camPos.lerp(targetPos, 1 - Math.pow(0.02, dt));
@@ -2553,7 +2564,8 @@ function onPointerMove(e) {
 }
 function onPointerUp() {}
 function onWheel(e) {
-  camRadius = Math.min(4.2, Math.max(0.9, camRadius * (1 + e.deltaY * 0.001)));
+  // Плавный зум: цель радиуса, приближение догоняет её по кадрам
+  camTargetRadius = Math.min(4.2, Math.max(0.9, camTargetRadius * (1 + e.deltaY * 0.001)));
 }
 
 // ---------------------------------------------------------------------------
