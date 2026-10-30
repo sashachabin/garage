@@ -1039,14 +1039,25 @@ const HAIR_COLORS = [0x2b1a0f, 0x50341c, 0x1f1208, 0x8a5a2b, 0x44323a, 0x6b3a1e]
 
 let myId = null,
   myNick = randomNick();
-let myLook = null; // внешность локального игрока: { body, sleeve, pants, skin, hair }
+let myLook = null; // внешность локального игрока (см. LOOK_KEYS)
+// Порядок полей внешности в сетевом массиве state.ap (первые 5 — как раньше)
+const LOOK_KEYS = ["body", "sleeve", "pants", "skin", "hair", "shoes", "eyes", "hairStyle", "hat", "beard"];
+const LOOK_DEFAULTS = { shoes: 0x333b47, eyes: 0x243448, hairStyle: 0, hat: 0, beard: 1 };
+const lookToArr = (l) => LOOK_KEYS.map((k) => (l[k] !== undefined ? l[k] : LOOK_DEFAULTS[k]));
+function arrToLook(a) {
+  const l = {};
+  LOOK_KEYS.forEach((k, i) => (l[k] = a[i] !== undefined && a[i] !== null ? a[i] : LOOK_DEFAULTS[k]));
+  return l;
+}
+let wantedNick = ""; // ник, выбранный на экране входа
 const remotePlayers = new Map(); // id -> { base, group, refs, pos, rotY, moveSpeed, run, sitting, animT, meshLabel }
 let ws = null;
 let wsReconnect = 0;
 
 function wsUrl() {
   const proto = location.protocol === "https:" ? "wss" : "ws";
-  return `${proto}://${location.host}/ws`;
+  const q = wantedNick ? "?nick=" + encodeURIComponent(wantedNick) : "";
+  return `${proto}://${location.host}/ws${q}`;
 }
 
 function connectNet() {
@@ -1075,6 +1086,10 @@ function connectNet() {
     if (msg.type === "hello") {
       myId = msg.id;
       myNick = msg.nick;
+      // Внешность, сохранённая на сервере под этим ником; нет — отдаём свою
+      if (msg.look) setMyLook(Object.assign({}, myLook, msg.look));
+      else sendLook();
+      if (!msg.look && !avatarShownOnce) openAvatar();
 
       // СОЗДАЁМ МЕТКУ ПОСЛЕ ПОЛУЧЕНИЯ НИКА ОТ СЕРВЕРА
       if (!localLabel) {
@@ -1100,6 +1115,14 @@ function connectNet() {
         updateRemotePlayer(p, msg.state);
         if (msg.nick && p.nick !== msg.nick) p.nick = msg.nick;
       }
+    } else if (msg.type === "nick") {
+      updateLocalNick(msg.nick);
+      renderPlayerList();
+    } else if (msg.type === "rename") {
+      const p = remotePlayers.get(msg.id);
+      if (p) p.nick = msg.nick;
+      pushChatSystem(`${msg.old} теперь ${msg.nick}`);
+      renderPlayerList();
     } else if (msg.type === "leave") {
       removeRemotePlayer(msg.id);
       pushChatSystem(`${msg.nick || "Кто-то"} вышел`);
@@ -1165,8 +1188,216 @@ function ownState() {
     pt: punchAnim > 0 ? 1 : 0,
     hy: localRefs && localRefs.head ? +localRefs.head.rotation.y.toFixed(3) : 0,
     px: +headPitch.toFixed(3),
-    ap: myLook ? [myLook.body, myLook.sleeve, myLook.pants, myLook.skin, myLook.hair] : null,
+    ap: myLook ? lookToArr(myLook) : null,
   };
+}
+
+function sendLook() {
+  if (ws && ws.readyState === 1 && myLook) ws.send(JSON.stringify({ type: "look", look: myLook }));
+}
+
+// ---------------------------------------------------------------------------
+// Экран входа (только ник, без паролей) и редактор персонажа
+// ---------------------------------------------------------------------------
+const NICK_RE = /^[A-Za-zА-Яа-яЁё0-9_\- ]{2,16}$/;
+let lobbyOpen = false;
+let avatarOpen = false;
+let avatarShownOnce = false;
+let avatarDraft = null; // редактируемая копия внешности
+let avatarPrev = null; // { renderer, scene, camera, group, raf }
+
+function lsGet(k) {
+  try {
+    return localStorage.getItem(k) || "";
+  } catch {
+    return "";
+  }
+}
+function lsSet(k, v) {
+  try {
+    localStorage.setItem(k, v);
+  } catch {}
+}
+function cleanNickInput(v) {
+  return String(v || "").trim().replace(/\s+/g, " ");
+}
+function releaseControls() {
+  keys = {};
+  if (document.pointerLockElement) document.exitPointerLock();
+}
+
+function openLobby() {
+  lobbyOpen = true;
+  releaseControls();
+  const el = document.getElementById("lobby");
+  const input = document.getElementById("lobby-nick");
+  input.value = lsGet("garage.nick");
+  el.classList.add("open");
+  setTimeout(() => input.focus(), 50);
+  document.getElementById("lobby-go").onclick = submitLobby;
+  document.getElementById("lobby-guest").onclick = () => enterGarage("");
+}
+function submitLobby() {
+  const nick = cleanNickInput(document.getElementById("lobby-nick").value);
+  const err = document.getElementById("lobby-err");
+  if (!NICK_RE.test(nick)) {
+    err.textContent = "Ник: 2–16 символов — буквы, цифры, пробел, _ или -";
+    return;
+  }
+  lsSet("garage.nick", nick);
+  enterGarage(nick);
+}
+function enterGarage(nick) {
+  wantedNick = nick;
+  lobbyOpen = false;
+  document.getElementById("lobby").classList.remove("open");
+  connectNet();
+}
+
+const AVATAR_COLOR_ROWS = [
+  ["body", "Футболка", PLAYER_COLORS.map((c) => c.body).concat([0xeeeeee, 0x111111])],
+  ["sleeve", "Рукава", PLAYER_COLORS.map((c) => c.sleeve).concat([0xeeeeee, 0x111111])],
+  ["pants", "Штаны", [0x384257, 0x46517a, 0x2d3a4f, 0x1b1b1b, 0x6b5a3e, 0x7a7f86, 0x3d5c3a]],
+  ["shoes", "Обувь", [0x333b47, 0x1b1b1b, 0x6b3a1e, 0xeeeeee, 0xc0392b, 0x2266aa]],
+  ["skin", "Кожа", SKIN_TONES],
+  ["hair", "Волосы", HAIR_COLORS.concat([0xd8b46a, 0xb0b0b0, 0xc0392b])],
+  ["eyes", "Глаза", [0x243448, 0x3a2413, 0x2e6b3a, 0x2a6fb0, 0x555555]],
+];
+const AVATAR_STYLE_ROWS = [
+  ["hairStyle", "Причёска", ["Короткая", "Лысый", "Длинные", "Ирокез"]],
+  ["hat", "Головной убор", ["Нет", "Кепка", "Шапка", "Цилиндр"]],
+  ["beard", "Бородка", ["Нет", "Есть"]],
+];
+const hexStr = (n) => "#" + ("00000" + n.toString(16)).slice(-6);
+
+function buildAvatarUI() {
+  const box = document.getElementById("av-rows");
+  let html = "";
+  for (const [k, label, colors] of AVATAR_COLOR_ROWS) {
+    html += `<div class="av-row"><div class="av-lbl">${label}</div><div class="av-opts">`;
+    for (const c of colors) html += `<i class="av-sw" data-k="${k}" data-v="${c}" style="background:${hexStr(c)}"></i>`;
+    html += `<input type="color" class="av-pick" data-k="${k}" title="Свой цвет" /></div></div>`;
+  }
+  for (const [k, label, names] of AVATAR_STYLE_ROWS) {
+    html += `<div class="av-row"><div class="av-lbl">${label}</div><div class="av-opts">`;
+    names.forEach((n, i) => (html += `<button class="av-btn" data-k="${k}" data-v="${i}">${n}</button>`));
+    html += `</div></div>`;
+  }
+  box.innerHTML = html;
+  box.onclick = (e) => {
+    const t = e.target;
+    if (!t.dataset || !t.dataset.k || t.classList.contains("av-pick")) return;
+    avatarDraft[t.dataset.k] = +t.dataset.v;
+    refreshAvatar();
+  };
+  box.oninput = (e) => {
+    const t = e.target;
+    if (!t.classList.contains("av-pick")) return;
+    avatarDraft[t.dataset.k] = parseInt(t.value.slice(1), 16);
+    refreshAvatar();
+  };
+  document.getElementById("av-random").onclick = () => {
+    const pick = (arr) => arr[(Math.random() * arr.length) | 0];
+    for (const [k, , colors] of AVATAR_COLOR_ROWS) avatarDraft[k] = pick(colors);
+    for (const [k, , names] of AVATAR_STYLE_ROWS) avatarDraft[k] = (Math.random() * names.length) | 0;
+    refreshAvatar();
+  };
+  document.getElementById("av-done").onclick = () => closeAvatar(true);
+  document.getElementById("av-cancel").onclick = () => closeAvatar(false);
+}
+
+function refreshAvatar() {
+  // Подсветка выбранных вариантов
+  for (const el of document.querySelectorAll("#av-rows [data-k]")) {
+    if (el.classList.contains("av-pick")) el.value = hexStr(avatarDraft[el.dataset.k]);
+    else el.classList.toggle("sel", +el.dataset.v === avatarDraft[el.dataset.k]);
+  }
+  // Пересобираем модель в превью
+  const pv = avatarPrev;
+  if (!pv) return;
+  const rotY = pv.group ? pv.group.rotation.y : 0.5;
+  if (pv.group) {
+    pv.scene.remove(pv.group);
+    disposeCharacter(pv.group);
+  }
+  pv.group = createCharacter(avatarDraft).group;
+  pv.group.traverse((o) => o.layers.set(0));
+  pv.group.rotation.y = rotY;
+  pv.scene.add(pv.group);
+}
+
+function initAvatarPreview() {
+  const canvas = document.getElementById("av-canvas");
+  const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setSize(canvas.clientWidth, canvas.clientHeight, false);
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.3;
+  const sc = new THREE.Scene();
+  sc.add(new THREE.HemisphereLight(0xffe9d4, 0x2a1f14, 1.2));
+  const key = new THREE.DirectionalLight(0xffe5c6, 1.6);
+  key.position.set(1.5, 3, 3);
+  sc.add(key);
+  const cam = new THREE.PerspectiveCamera(30, canvas.clientWidth / canvas.clientHeight, 0.1, 20);
+  cam.position.set(0, 1.15, 4.2);
+  cam.lookAt(0, 0.95, 0);
+  avatarPrev = { renderer, scene: sc, camera: cam, group: null, raf: 0, drag: null };
+  // Крутим модель мышью
+  canvas.addEventListener("pointerdown", (e) => (avatarPrev.drag = e.clientX));
+  addEventListener("pointerup", () => avatarPrev && (avatarPrev.drag = null));
+  addEventListener("pointermove", (e) => {
+    const pv = avatarPrev;
+    if (!pv || pv.drag === null || !pv.group) return;
+    pv.group.rotation.y += (e.clientX - pv.drag) * 0.012;
+    pv.drag = e.clientX;
+  });
+}
+
+function avatarLoop() {
+  const pv = avatarPrev;
+  if (!avatarOpen || !pv) return;
+  if (pv.group && pv.drag === null) pv.group.rotation.y += 0.008;
+  pv.renderer.render(pv.scene, pv.camera);
+  pv.raf = requestAnimationFrame(avatarLoop);
+}
+
+function openAvatar() {
+  if (avatarOpen || lobbyOpen) return;
+  avatarOpen = true;
+  avatarShownOnce = true;
+  releaseControls();
+  if (chatOpen) closeChat();
+  if (radioMenuOpen) closeRadioMenu();
+  if (tvOpen) closeTV();
+  document.getElementById("avatar").classList.add("open");
+  if (!document.getElementById("av-rows").childElementCount) buildAvatarUI();
+  if (!avatarPrev) initAvatarPreview();
+  avatarDraft = Object.assign({}, LOOK_DEFAULTS, myLook);
+  document.getElementById("av-nick").value = myNick || "";
+  document.getElementById("av-err").textContent = "";
+  refreshAvatar();
+  avatarLoop();
+}
+
+function closeAvatar(apply) {
+  if (!avatarOpen) return;
+  if (apply) {
+    const nick = cleanNickInput(document.getElementById("av-nick").value);
+    if (nick !== myNick) {
+      if (!NICK_RE.test(nick)) {
+        document.getElementById("av-err").textContent = "Ник: 2–16 символов — буквы, цифры, пробел, _ или -";
+        return;
+      }
+      lsSet("garage.nick", nick);
+      wantedNick = nick;
+      if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "nick", nick }));
+    }
+    setMyLook(Object.assign({}, avatarDraft));
+    sendLook();
+  }
+  avatarOpen = false;
+  cancelAnimationFrame(avatarPrev.raf);
+  document.getElementById("avatar").classList.remove("open");
 }
 
 let netTimer = 0;
@@ -1207,9 +1438,7 @@ function randomVariant(colors) {
 function remoteLook(msg) {
   // Внешность, как у игрока на его экране (приходит в каждом state)
   const a = msg.state && msg.state.ap;
-  if (a && a.length === 5) {
-    return { body: a[0], sleeve: a[1], pants: a[2], skin: a[3], hair: a[4] };
-  }
+  if (a && a.length >= 5) return arrToLook(a);
   // Запасной вариант: стабильный набор по id
   const h = idHash(msg.id);
   const colors = cycleColors(msg.id);
@@ -1227,6 +1456,7 @@ function spawnRemotePlayer(msg) {
   if (remotePlayers.has(id)) return;
   const { group, refs } = createCharacter(remoteLook(msg));
   group.position.set(0, 0, 0);
+  const apKey = msg.state && msg.state.ap ? msg.state.ap.join() : "";
   group.layers.set(1); // удалённый игрок — слой 1 (поверх YouTube)
   scene.add(group);
   const entry = {
@@ -1247,6 +1477,7 @@ function spawnRemotePlayer(msg) {
     tzPrev: 0, // предыдущая цель
     updT: 0, // время последнего state
     nick: msg.nick || randomNick(),
+    apKey,
   };
   // Метка с ником и HP
   const label = document.createElement("div");
@@ -1265,6 +1496,19 @@ function spawnRemotePlayer(msg) {
 
 function updateRemotePlayer(p, st) {
   if (!st) return;
+  // Игрок сменил внешность — пересобираем модель
+  if (st.ap && st.ap.join() !== p.apKey) {
+    p.apKey = st.ap.join();
+    const old = p.group;
+    const { group, refs } = createCharacter(arrToLook(st.ap));
+    group.position.copy(old.position);
+    group.rotation.copy(old.rotation);
+    scene.remove(old);
+    disposeCharacter(old);
+    scene.add(group);
+    p.group = group;
+    p.refs = refs;
+  }
   // Запоминаем направление движения (dead reckoning) между пакетами
   const t = netClock;
   const ddt = t - (p.updT ?? t);
@@ -2085,11 +2329,12 @@ function init() {
   // НЕ СОЗДАЁМ МЕТКУ ЗДЕСЬ - ОНА БУДЕТ СОЗДАНА ПОСЛЕ ПОЛУЧЕНИЯ НИКА ОТ СЕРВЕРА
   // buildLocalLabel(); // <-- УДАЛЕНО!
 
-  connectNet();
+  openLobby();
+  document.getElementById("avbtn").onclick = () => openAvatar();
   sfx.ambient(true); // лёгкий гул гаража (звук начнётся после первого клика)
   initGarageRadio();
   initTVUI();
-  pushChatSystem("Добро пожаловать в гараж! T — чат, E — сесть/встать, V — рация");
+  pushChatSystem("Добро пожаловать в гараж! T — чат, E — сесть/встать, V — рация, P — персонаж");
 
   addEventListener("keydown", (e) => {
     unlock(); // разблокировка аудио первым вводом
@@ -2104,7 +2349,18 @@ function init() {
       }
       return;
     }
+    // Экран входа / редактор: клавиши идут в поля ввода, не в игру
+    if (lobbyOpen) {
+      if (e.code === "Enter") submitLobby();
+      return;
+    }
+    if (avatarOpen) {
+      if (e.code === "Escape") closeAvatar(false);
+      if (e.code === "Enter") closeAvatar(true);
+      return;
+    }
     keys[e.code] = true;
+    if (e.code === "KeyP" && !e.repeat) openAvatar();
     if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "Space"].includes(e.code))
       e.preventDefault();
     if (e.code === "KeyT" && !e.repeat) toggleChat();
@@ -3014,7 +3270,7 @@ async function buildFurniture() {
 // ---------------------------------------------------------------------------
 // Персонаж
 // ---------------------------------------------------------------------------
-function makeFaceTexture(skinHex = 0xf0c79b) {
+function makeFaceTexture(skinHex = 0xf0c79b, eyesHex = 0x243448, beard = 1) {
   // «Скин»-лицо 16×16: зависит от тона кожи, Nearest-фильтр — как в Minecraft
   const cv = document.createElement("canvas");
   cv.width = 16;
@@ -3029,7 +3285,7 @@ function makeFaceTexture(skinHex = 0xf0c79b) {
   g.fillStyle = darker;
   g.fillRect(1, 13, 14, 3);
   // глаза: тёмные целиком (без белой «полосы» под зрачком) + блик сверху
-  g.fillStyle = "#243448";
+  g.fillStyle = "#" + new THREE.Color(eyesHex).getHexString();
   g.fillRect(3, 6, 3, 3);
   g.fillRect(10, 6, 3, 3);
   g.fillStyle = "#9fb3c4";
@@ -3045,7 +3301,7 @@ function makeFaceTexture(skinHex = 0xf0c79b) {
   // рот и бородка
   g.fillStyle = "#6b4a2f";
   g.fillRect(5, 11, 6, 1);
-  g.fillRect(6, 12, 4, 1);
+  if (beard) g.fillRect(6, 12, 4, 1);
   const tex = new THREE.CanvasTexture(cv);
   tex.magFilter = THREE.NearestFilter;
   tex.minFilter = THREE.NearestFilter;
@@ -3065,7 +3321,7 @@ function createCharacter(opts = {}) {
   const matPants = new THREE.MeshLambertMaterial({ color: opts.pants ?? 0x3a4358, roughness: 0.9 });
   const matSkin = new THREE.MeshLambertMaterial({ color: opts.skin ?? 0xf0c79b, roughness: 0.85 });
   const matHair = new THREE.MeshLambertMaterial({ color: opts.hair ?? 0x2b1a0f, roughness: 0.95 });
-  const matShoe = new THREE.MeshLambertMaterial({ color: 0x333b47, roughness: 0.85 });
+  const matShoe = new THREE.MeshLambertMaterial({ color: opts.shoes ?? 0x333b47, roughness: 0.85 });
 
   const refs = {};
   const boxM = (w, h, d, mat, y = 0, parent, x = 0, z = 0) => {
@@ -3086,13 +3342,14 @@ function createCharacter(opts = {}) {
 
   // ---- Голова: куб с пиксельным лицом и шапкой волос ----
   const faceMat = new THREE.MeshLambertMaterial({
-    map: makeFaceTexture(opts.skin ?? 0xf0c79b),
+    map: makeFaceTexture(opts.skin ?? 0xf0c79b, opts.eyes ?? 0x243448, opts.beard ?? 1),
     roughness: 0.85,
   });
+  const bald = opts.hairStyle === 1;
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.38, 0.34), [
     matSkin,
     matSkin,
-    matHair,
+    bald ? matSkin : matHair,
     matSkin,
     faceMat,
     matSkin,
@@ -3101,7 +3358,28 @@ function createCharacter(opts = {}) {
   head.castShadow = true;
   torso.add(head);
   refs.head = head;
-  boxM(0.38, 0.07, 0.38, matHair, 0.17, head, 0, 0); // волосы сверху — крутятся с головой
+  // Причёска (крутится с головой): 0 — короткая, 1 — лысый, 2 — длинные, 3 — ирокез
+  const hairStyle = opts.hairStyle ?? 0;
+  if (hairStyle === 0 || hairStyle === 2) boxM(0.38, 0.07, 0.38, matHair, 0.17, head, 0, 0);
+  if (hairStyle === 2) {
+    boxM(0.38, 0.4, 0.06, matHair, -0.04, head, 0, -0.19); // затылок
+    boxM(0.04, 0.26, 0.3, matHair, 0.03, head, -0.19, -0.02); // виски
+    boxM(0.04, 0.26, 0.3, matHair, 0.03, head, 0.19, -0.02);
+  }
+  if (hairStyle === 3) boxM(0.07, 0.14, 0.36, matHair, 0.25, head, 0, -0.01);
+  // Головной убор: 0 — нет, 1 — кепка, 2 — шапка, 3 — цилиндр (цвет футболки)
+  const hat = opts.hat ?? 0;
+  if (hat === 1) {
+    boxM(0.39, 0.1, 0.39, matShirt, 0.22, head, 0, 0);
+    boxM(0.36, 0.03, 0.16, matShirt, 0.18, head, 0, 0.26); // козырёк
+  } else if (hat === 2) {
+    boxM(0.4, 0.16, 0.4, matShirt, 0.2, head, 0, 0);
+    boxM(0.1, 0.06, 0.1, matSleeve, 0.31, head, 0, 0); // помпон
+  } else if (hat === 3) {
+    boxM(0.5, 0.03, 0.5, matShirt, 0.2, head, 0, 0); // поля
+    boxM(0.3, 0.3, 0.3, matShirt, 0.36, head, 0, 0);
+    boxM(0.31, 0.05, 0.31, matSleeve, 0.24, head, 0, 0); // лента
+  }
 
   // ---- Руки: «кубики» плеча и предплечья, квадратная кисть ----
   function buildArm(side) {
@@ -3171,10 +3449,33 @@ function setCharacterTint(refs, t) {
   }
 }
 
+function disposeCharacter(group) {
+  group.traverse((o) => {
+    if (!o.isMesh) return;
+    o.geometry.dispose();
+    for (const m of Array.isArray(o.material) ? o.material : [o.material]) {
+      if (m.map) m.map.dispose();
+      m.dispose();
+    }
+  });
+}
+
 function buildCharacter() {
   const colors = PLAYER_COLORS[(Math.random() * PLAYER_COLORS.length) | 0];
-  myLook = randomVariant(colors);
+  setMyLook(Object.assign({}, LOOK_DEFAULTS, randomVariant(colors)));
+}
+
+// Пересобирает локального персонажа с новой внешностью (позиция сохраняется)
+function setMyLook(look) {
+  myLook = look;
+  const old = character;
   const { group, refs } = createCharacter(myLook);
+  if (old) {
+    group.position.copy(old.position);
+    group.rotation.copy(old.rotation);
+    scene.remove(old);
+    disposeCharacter(old);
+  }
   character = group;
   localRefs = refs;
   torso = refs.torso;
@@ -3242,6 +3543,7 @@ function updatePlayer(dt) {
   if (chatOpen) return; // набор текста — игрок не двигается
   if (radioMenuOpen) return; // меню радио — управление заблокировано
   if (tvOpen) return; // пульт TV — управление заблокировано
+  if (lobbyOpen || avatarOpen) return; // вход / редактор персонажа
 
   // Обработка смерти: ждём 3 секунды (в неактивной вкладке RAF заморожен — афк не возрождается)
   if (dead) {
@@ -3872,7 +4174,7 @@ function updateCamera(dt) {
 function onPointerDown(e) {
   // Меню (радио/ТВ/чат) открыто — мышь свободна: не захватываем курсор,
   // чтобы клики по кнопкам и слайдерам работали.
-  if (chatOpen || radioMenuOpen || tvOpen) return;
+  if (chatOpen || radioMenuOpen || tvOpen || lobbyOpen || avatarOpen) return;
   // Pointer lock: клик захватывает курсор (Esc — показывает обратно).
   // Первый клик только захватывает, последующие бьют.
   if (e.button === 0) {
@@ -3890,7 +4192,7 @@ function onPointerLockChange() {
 }
 document.addEventListener("pointerlockchange", onPointerLockChange);
 function onPointerMove(e) {
-  if (chatOpen || radioMenuOpen || tvOpen) return;
+  if (chatOpen || radioMenuOpen || tvOpen || lobbyOpen || avatarOpen) return;
   // Движение мыши крутит камеру без нажатия.
   // Как в Sketchbook: фиксированная чувствительность (градусы на пиксель),
   // theta — горизонт, phi — вертикаль с широким диапазоном.
@@ -3904,7 +4206,7 @@ function onPointerMove(e) {
 }
 function onPointerUp() {}
 function onWheel(e) {
-  if (chatOpen || radioMenuOpen || tvOpen) return;
+  if (chatOpen || radioMenuOpen || tvOpen || lobbyOpen || avatarOpen) return;
   // Плавный зум: цель радиуса, приближение догоняет её по кадрам
   camTargetRadius = Math.min(4.2, Math.max(0.9, camTargetRadius * (1 + e.deltaY * 0.001)));
 }

@@ -135,14 +135,41 @@ function randomNick() {
   );
 }
 
-wss.on("connection", (ws) => {
+// --- Профили игроков: ник -> внешность. Только в памяти сервера, без паролей ---
+const profiles = new Map(); // ключ ника (lowercase) -> look
+const NICK_RE = /^[A-Za-zА-Яа-яЁё0-9_\- ]{2,16}$/;
+const LOOK_COLORS = ["body", "sleeve", "pants", "shoes", "skin", "hair", "eyes"];
+const LOOK_STYLES = { hairStyle: 4, hat: 4, beard: 2 }; // поле -> число вариантов
+
+function cleanNick(nick) {
+  nick = String(nick || "").trim().replace(/\s+/g, " ");
+  return NICK_RE.test(nick) ? nick : null;
+}
+function cleanLook(look) {
+  if (!look || typeof look !== "object") return null;
+  const out = {};
+  for (const k of LOOK_COLORS) {
+    const v = look[k];
+    if (Number.isInteger(v) && v >= 0 && v <= 0xffffff) out[k] = v;
+  }
+  for (const [k, n] of Object.entries(LOOK_STYLES)) {
+    const v = look[k];
+    if (Number.isInteger(v) && v >= 0 && v < n) out[k] = v;
+  }
+  return out;
+}
+const nickKey = (nick) => nick.toLowerCase();
+
+wss.on("connection", (ws, req) => {
   const id = "p" + nextId++;
-  const nick = randomNick();
+  const wanted = cleanNick(new URL(req.url, "http://x").searchParams.get("nick"));
+  const nick = wanted || randomNick();
+  const look = profiles.get(nickKey(nick)) || null;
   clients.set(ws, { id, nick, ws });
   const peers = [...clients.values()]
     .filter((c) => c.ws !== ws && c.state)
     .map((c) => ({ id: c.id, nick: c.nick, state: c.state }));
-  ws.send(JSON.stringify({ type: "hello", id, nick, peers, radio: radioState, tv: tvState }));
+  ws.send(JSON.stringify({ type: "hello", id, nick, look, peers, radio: radioState, tv: tvState }));
   const joinTs = Date.now();
   
   broadcast({ type: "join", id, nick, ts: joinTs }, ws);
@@ -163,6 +190,24 @@ wss.on("connection", (ws) => {
         client.state = msg.state;
         broadcast({ type: "state", id, state: msg.state, nick: client.nick }, ws);
         break;
+
+      case "look": {
+        // Сохраняем внешность под ником; другим она уходит в state.ap
+        const look = cleanLook(msg.look);
+        if (look) profiles.set(nickKey(client.nick), look);
+        break;
+      }
+
+      case "nick": {
+        const nick = cleanNick(msg.nick);
+        if (!nick || nick === client.nick) break;
+        const old = client.nick;
+        client.nick = nick;
+        ws.send(JSON.stringify({ type: "nick", id, nick, look: profiles.get(nickKey(nick)) || null }));
+        broadcast({ type: "rename", id, old, nick }, ws);
+        console.log(`~ ${old} -> ${nick}`);
+        break;
+      }
 
       case "chat": {
         const text = String(msg.text || "").slice(0, 200);
