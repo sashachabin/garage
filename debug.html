@@ -6,7 +6,7 @@
 <title>Сцена гаража — /debug</title>
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, sans-serif; background: #14161a; color: #eee; }
-  #view { position: absolute; inset: 0; }
+  #view { position: absolute; top: 0; left: 0; right: 0; bottom: 0; }
   #view canvas { display: block; }
   #toolbar {
     position: fixed; top: 0; left: 0; right: 0; z-index: 5; height: 42px;
@@ -83,14 +83,6 @@
 <div id="status">Загрузка сцены…</div>
 <div id="hint">чтение только — объекты лежат в scene.json<br/>клик — выбрать · G — сетка<br/>правь scene.json и жми «Перечитать»</div>
 
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-  }
-}
-</script>
-<script type="module" src="debug.js"></script>
+<script type="module" src="/dist/debug.js"></script>
 </body>
 </html>

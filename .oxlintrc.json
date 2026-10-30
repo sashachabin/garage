@@ -1,5 +1,5 @@
 {
-  "ignorePatterns": ["node_modules/**", "posters/**", "textures/**", "lhr.log"],
+  "ignorePatterns": ["node_modules/**", "posters/**", "textures/**", "lhr.log", "dist/**"],
   "rules": {
     "no-console": "off",
     "no-undef": "off",

@@ -35,7 +35,7 @@ const ARCH_X1 = ARCH_W / 2;
 const TOTAL_LEN = Z_FRONT - Z_REAR; // ≈ 11.5
 const ZC = (Z_REAR + Z_FRONT) / 2;
 
-let scene, camera, renderer, clock;
+let scene, camera, renderer, cssRenderer, charRenderer, clock;
 let character,
   localRefs,
   torso,
@@ -254,6 +254,755 @@ function updateGarageRadio(dt) {
   radioEl.play().catch(() => {});
 }
 
+// ---------------------------------------------------------------------------
+// CSS3DRenderer / CSS3DObject (three.js examples/jsm/renderers/CSS3DRenderer.js,
+// встроено инлайн — так же, как у вас уже встроен Reflector чуть ниже по файлу).
+// Если в вашем index.html есть importmap с "three/addons/", можно вместо этого
+// блока написать: import { CSS3DRenderer, CSS3DObject } from "three/addons/renderers/CSS3DRenderer.js";
+// и удалить классы ниже — работать будет идентично.
+// ---------------------------------------------------------------------------
+class CSS3DObject extends THREE.Object3D {
+  constructor(element = document.createElement("div")) {
+    super();
+    this.isCSS3DObject = true;
+    this.element = element;
+    this.element.style.position = "absolute";
+    this.element.style.pointerEvents = "auto";
+    this.element.style.userSelect = "none";
+    this.addEventListener("removed", () => {
+      this.traverse((obj) => {
+        if (obj.element instanceof Element && obj.element.parentNode) obj.element.remove();
+      });
+    });
+  }
+}
+
+class CSS3DRenderer {
+  constructor() {
+    let width = 0,
+      height = 0,
+      widthHalf = 0,
+      heightHalf = 0;
+    let cameraStyle = "";
+    const objectStyles = new WeakMap();
+
+    const domElement = document.createElement("div");
+    domElement.style.overflow = "hidden";
+    this.domElement = domElement;
+
+    const cameraEl = document.createElement("div");
+    cameraEl.style.transformStyle = "preserve-3d";
+    cameraEl.style.pointerEvents = "none";
+    domElement.appendChild(cameraEl);
+    this.cameraElement = cameraEl; // публичный доступ, чтобы можно было заранее класть DOM-узлы в живое дерево
+
+    const eps = (v) => (Math.abs(v) < 1e-10 ? 0 : v);
+
+    const cameraCSSMatrix = (m) => {
+      const e = m.elements;
+      return (
+        "matrix3d(" +
+        [
+          eps(e[0]), eps(-e[1]), eps(e[2]), eps(e[3]),
+          eps(e[4]), eps(-e[5]), eps(e[6]), eps(e[7]),
+          eps(e[8]), eps(-e[9]), eps(e[10]), eps(e[11]),
+          eps(e[12]), eps(-e[13]), eps(e[14]), eps(e[15]),
+        ].join(",") +
+        ")"
+      );
+    };
+    const objectCSSMatrix = (m) => {
+      const e = m.elements;
+      return (
+        "translate(-50%,-50%)matrix3d(" +
+        [
+          eps(e[0]), eps(e[1]), eps(e[2]), eps(e[3]),
+          eps(-e[4]), eps(-e[5]), eps(-e[6]), eps(-e[7]),
+          eps(e[8]), eps(e[9]), eps(e[10]), eps(e[11]),
+          eps(e[12]), eps(e[13]), eps(e[14]), eps(e[15]),
+        ].join(",") +
+        ")"
+      );
+    };
+
+    const renderObject = (object) => {
+      if (object.isCSS3DObject) {
+        const style = objectCSSMatrix(object.matrixWorld);
+        const el = object.element;
+        if (objectStyles.get(object) !== style) {
+          el.style.transform = style;
+          objectStyles.set(object, style);
+        }
+        if (el.parentNode !== cameraEl) cameraEl.appendChild(el);
+        el.style.display = object.visible ? "" : "none";
+      }
+      for (let i = 0; i < object.children.length; i++) renderObject(object.children[i]);
+    };
+
+    this.setSize = (w, h) => {
+      width = w;
+      height = h;
+      widthHalf = width / 2;
+      heightHalf = height / 2;
+      domElement.style.width = w + "px";
+      domElement.style.height = h + "px";
+      cameraEl.style.width = w + "px";
+      cameraEl.style.height = h + "px";
+    };
+
+    this.render = (scene, camera) => {
+      const fov = camera.projectionMatrix.elements[5] * heightHalf;
+      scene.updateMatrixWorld();
+      if (camera.parent === null) camera.updateMatrixWorld();
+      const camMatrix = "translateZ(" + fov + "px)" + cameraCSSMatrix(camera.matrixWorldInverse);
+      const style = camMatrix + " translate(" + widthHalf + "px," + heightHalf + "px)";
+      if (cameraStyle !== style) {
+        cameraEl.style.transform = style;
+        cameraStyle = style;
+      }
+      domElement.style.perspective = fov + "px";
+      renderObject(scene);
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// TV / пульт: синхронное видео YouTube поверх экрана проектора
+// ---------------------------------------------------------------------------
+let tvOpen = false; // пульт открыт
+let tvScreen = null; // mesh экрана проектора
+let tvTrack = null; // { videoId, title }
+let tvPlaying = false;
+let tvLoadedId = null; // какой ролик загружен в плеер
+let tvWantVideoId = null; // id, который ждёт загрузки плеера
+let tvPendingServerState = null; // состояние от сервера до готовности плеера
+let tvPlayerReady = false;
+let tvCur = 0; // текущая позиция (сек), опрос через tvPlayer.getCurrentTime()
+let tvDur = 0; // длительность (сек)
+let tvPState = -1; // 1 — играет, 2 — пауза, 0 — конец
+let tvOverlay = null; // div с YT-плеером (живёт в CSS3DObject)
+let tvPlayer = null; // экземпляр YT.Player
+let tvApplying = false; // защита от обратной петли onStateChange
+let tvPlayCheck = 0; // таймер проверки автоплея
+let tvCSSObject = null; // CSS3DObject, обёртывающий tvOverlay на экране проектора
+let tvPlaylist = []; // [{ videoId, title, dur }]
+let tvPlaylistIdx = -1; // текущий индекс в плейлисте
+let tvSyncTimer = 0; // таймер периодической синхронизации позиции
+const TV_SCREEN_W = 2.8;
+const TV_SCREEN_H = 1.55;
+const TV_PX_PER_UNIT = 400;
+
+function bindTVScreen(mesh) {
+  tvScreen = mesh;
+}
+
+function toggleTV() {
+  if (tvOpen) closeTV();
+  else openTV();
+}
+function openTV() {
+  if (sitting < 0) {
+    pushChatSystem("Сядь на диван, чтобы открыть пульт");
+    return;
+  }
+  tvOpen = true;
+  if (document.pointerLockElement) document.exitPointerLock();
+  document.body.classList.add("menu");
+  const el = document.getElementById("tvmenu");
+  if (el) el.classList.add("open");
+}
+function closeTV() {
+  tvOpen = false;
+  document.body.classList.remove("menu");
+  const el = document.getElementById("tvmenu");
+  if (el) el.classList.remove("open");
+}
+
+function fmtDur(s) {
+  if (!s || !isFinite(s)) return "0:00";
+  const m = Math.floor(s / 60),
+    sec = Math.floor(s % 60);
+  return m + ":" + String(sec).padStart(2, "0");
+}
+function tvDoSearch() {
+  const inp = document.getElementById("tv-search");
+  const q = (inp && inp.value || "").trim();
+  const note = document.getElementById("tv-note");
+  if (!q) return;
+  if (note) note.textContent = "";
+
+  // Проверяем есть ли list= — это плейлист YouTube
+  const listMatch = /[?&]list=([\w-]+)/.exec(q);
+  if (listMatch) {
+    const el = document.getElementById("tv-import-loading");
+    if (el) el.style.display = "inline";
+    if (ws && ws.readyState === 1)
+      ws.send(JSON.stringify({ type: "tv", cmd: "importPlaylist", url: q }));
+    if (inp) inp.value = "";
+    return;
+  }
+
+  // Проверяем YouTube URL
+  const id = ytIdFromUrl(q);
+  if (id) {
+    if (inp) inp.value = "";
+    fetchVideoTitle(id).then((title) => tvSelect(id, title || ""));
+    return;
+  }
+
+  if (inp) inp.value = "";
+  pushChatSystem("Вставь URL YouTube видео");
+}
+function fetchVideoTitle(videoId) {
+  return fetch("https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v=" + videoId + "&format=json")
+    .then((r) => r.ok ? r.json() : {})
+    .then((d) => d.title || "")
+    .catch(() => "");
+}
+function tvSelect(videoId, title) {
+  const note = document.getElementById("tv-note");
+  if (note) note.textContent = "";
+  tvEnqueue(videoId, title);
+}
+
+// ─── Управление через YT.Player API ───────────────────────────────────
+function tvPlayNow() {
+  if (!tvPlayer || !tvPlayerReady) return;
+  tvApplying = true;
+  try { tvPlayer.playVideo(); } catch {}
+  tvApplying = false;
+  clearTimeout(tvPlayCheck);
+  tvPlayCheck = setTimeout(() => {
+    try {
+      if (!tvPlayer) return;
+      if (tvPlayer.getPlayerState() !== 1) {
+        tvPlayer.mute();
+        tvPlayer.playVideo();
+      }
+      setTimeout(() => {
+        try { if (tvPlayer && tvPlayer.getPlayerState() === 1) tvPlayer.unMute(); } catch {}
+      }, 2500);
+    } catch {}
+  }, 1200);
+}
+function ytIdFromUrl(u) {
+  if (!u) return null;
+  const m = /(?:youtu\.be\/|shorts\/|music\.youtube\.com\/watch\?v=|[?&]v=)([\w-]{11})/.exec(u);
+  if (m) return m[1];
+  return /^[\w-]{11}$/.test(u.trim()) ? u.trim() : null;
+}
+function tvPause() {
+  if (!tvPlayer || !tvPlayerReady) return;
+  tvApplying = true;
+  try { tvPlayer.pauseVideo(); } catch {}
+  tvApplying = false;
+  tvPlaying = false;
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "tv", cmd: "pause", pos: tvCur }));
+}
+function tvResume() {
+  if (!tvPlayer || !tvPlayerReady || !tvTrack) return;
+  tvPlaying = true;
+  tvPlayNow();
+  if (ws && ws.readyState === 1)
+    ws.send(JSON.stringify({ type: "tv", cmd: "play", videoId: tvTrack.videoId, title: tvTrack.title }));
+}
+function tvStop() {
+  // Остановить YouTube
+  if (tvPlayer && tvPlayerReady) {
+    tvApplying = true;
+    try { tvPlayer.stopVideo(); } catch {}
+    tvApplying = false;
+  }
+
+  tvTrack = null;
+  tvLoadedId = null;
+  tvPlaying = false;
+  tvCur = 0;
+  tvDur = 0;
+  tvPlaylist = [];
+  tvPlaylistIdx = -1;
+  tvRenderPlaylist();
+  const ti = document.getElementById("tv-title");
+  if (ti) ti.textContent = "";
+  const pro = document.getElementById("tv-prog");
+  if (pro) pro.value = 0;
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "tv", cmd: "stop" }));
+}
+function tvSeek() {
+  const pro = document.getElementById("tv-prog");
+  const pos = pro ? parseFloat(pro.value) || 0 : 0;
+  if (tvPlayer && tvPlayerReady) {
+    tvApplying = true;
+    try { tvPlayer.seekTo(pos, true); } catch {}
+    tvApplying = false;
+  }
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "tv", cmd: "seek", pos }));
+}
+function tvVol() {
+  const sl = document.getElementById("tv-vol");
+  const v = sl ? parseFloat(sl.value) || 0.5 : 0.5;
+  if (tvPlayer && tvPlayerReady) {
+    try { tvPlayer.setVolume(Math.round(v * 100)); } catch {}
+  }
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "tv", cmd: "vol", vol: v }));
+}
+
+// ─── Очередь воспроизведения ────────────────────────────────────────
+// Модель: tvPlaylist = [прошлые, ТЕКУЩЕЕ(tvPlaylistIdx), очередь...]
+// Очередь — всё что после tvPlaylistIdx
+
+function tvEnqueue(videoId, title, dur) {
+  const existing = tvPlaylist.findIndex((e) => e.videoId === videoId);
+  if (existing >= 0) {
+    tvPlayIdx(existing);
+    return false;
+  }
+  // Вставляем в очередь следующим (сразу после текущего)
+  const insertAt = tvPlaylistIdx >= 0 ? tvPlaylistIdx + 1 : tvPlaylist.length;
+  tvPlaylist.splice(insertAt, 0, { videoId, title: title || "", dur: dur || 0 });
+  tvRenderPlaylist();
+  if (tvPlaylistIdx < 0) tvPlayIdx(0);
+  else tvSyncServer();
+  return true;
+}
+function tvPlayIdx(idx) {
+  if (idx < 0 || idx >= tvPlaylist.length) return;
+  tvPlaylistIdx = idx;
+  const { videoId, title } = tvPlaylist[idx];
+  tvLoad(videoId, title);
+  tvRenderPlaylist();
+  tvSyncServer();
+}
+function tvEnqueueBatch(items) {
+  let added = false;
+  const insertAt = tvPlaylistIdx >= 0 ? tvPlaylistIdx + 1 : tvPlaylist.length;
+  let offset = 0;
+  for (const item of items) {
+    if (!tvPlaylist.some((e) => e.videoId === item.videoId)) {
+      tvPlaylist.splice(insertAt + offset, 0, { videoId: item.videoId, title: item.title || "", dur: item.dur || 0 });
+      offset++;
+      added = true;
+    }
+  }
+  if (!added) return;
+  tvRenderPlaylist();
+  if (tvPlaylistIdx < 0) tvPlayIdx(0);
+  else tvSyncServer();
+}
+function tvNext() {
+  if (tvPlaylistIdx < tvPlaylist.length - 1) tvPlayIdx(tvPlaylistIdx + 1);
+}
+function tvPrev() {
+  if (tvPlaylistIdx > 0) tvPlayIdx(tvPlaylistIdx - 1);
+}
+function tvRemoveFromPlaylist(idx) {
+  if (idx < 0 || idx >= tvPlaylist.length) return;
+  tvPlaylist.splice(idx, 1);
+  if (tvPlaylist.length === 0) {
+    tvPlaylistIdx = -1;
+    tvStop();
+    return;
+  }
+  if (idx < tvPlaylistIdx) tvPlaylistIdx--;
+  else if (idx === tvPlaylistIdx) {
+    if (tvPlaylistIdx >= tvPlaylist.length) tvPlaylistIdx = tvPlaylist.length - 1;
+    tvLoad(tvPlaylist[tvPlaylistIdx].videoId, tvPlaylist[tvPlaylistIdx].title);
+  }
+  tvRenderPlaylist();
+  tvSyncServer();
+}
+function tvClearPlaylist() {
+  tvPlaylist = [];
+  tvPlaylistIdx = -1;
+  tvRenderPlaylist();
+  if (tvPlayer && tvPlayerReady) {
+    tvApplying = true;
+    try { tvPlayer.stopVideo(); } catch {}
+    tvApplying = false;
+  }
+  tvTrack = null;
+  tvLoadedId = null;
+  tvPlaying = false;
+  tvCur = 0;
+  tvDur = 0;
+  const ti = document.getElementById("tv-title");
+  if (ti) ti.textContent = "";
+  const pro = document.getElementById("tv-prog");
+  if (pro) pro.value = 0;
+  if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "tv", cmd: "stop" }));
+}
+function tvShuffle() {
+  // Перемешиваем только очередь (после текущего)
+  const qStart = tvPlaylistIdx + 1;
+  if (qStart >= tvPlaylist.length) return;
+  const queue = tvPlaylist.splice(qStart);
+  for (let i = queue.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [queue[i], queue[j]] = [queue[j], queue[i]];
+  }
+  tvPlaylist.push(...queue);
+  tvRenderPlaylist();
+  tvSyncServer();
+}
+function tvMoveItem(from, to) {
+  if (from < 0 || from >= tvPlaylist.length) return;
+  if (to < 0 || to >= tvPlaylist.length) return;
+  if (from === to) return;
+  const item = tvPlaylist.splice(from, 1)[0];
+  tvPlaylist.splice(to, 0, item);
+  if (tvPlaylistIdx === from) tvPlaylistIdx = to;
+  else if (from < tvPlaylistIdx && to >= tvPlaylistIdx) tvPlaylistIdx--;
+  else if (from > tvPlaylistIdx && to <= tvPlaylistIdx) tvPlaylistIdx++;
+  tvRenderPlaylist();
+  tvSyncServer();
+}
+function tvSyncServer() {
+  if (ws && ws.readyState === 1)
+    ws.send(JSON.stringify({
+      type: "tv", cmd: "play",
+      videoId: tvPlaylist[tvPlaylistIdx]?.videoId,
+      title: tvPlaylist[tvPlaylistIdx]?.title,
+      playlist: tvPlaylist, playlistIdx: tvPlaylistIdx,
+    }));
+}
+let tvDragIdx = -1;
+function tvRenderPlaylist() {
+  const el = document.getElementById("tv-pl");
+  const head = document.getElementById("tv-pl-head");
+  if (!el) return;
+  el.innerHTML = "";
+  if (tvPlaylist.length === 0) {
+    el.style.display = "none";
+    if (head) head.style.display = "none";
+    return;
+  }
+  el.style.display = "block";
+  if (head) head.style.display = "flex";
+
+  // Текущее видео — всегда первым
+  if (tvPlaylistIdx >= 0 && tvPlaylistIdx < tvPlaylist.length) {
+    const cur = tvPlaylist[tvPlaylistIdx];
+    const row = document.createElement("div");
+    row.className = "tv-pl-item current";
+    const label = document.createElement("span");
+    label.className = "tv-pl-label";
+    label.textContent = "▶";
+    const name = document.createElement("span");
+    name.className = "tv-pl-name";
+    name.textContent = cur.title || cur.videoId;
+    name.title = cur.title || cur.videoId;
+    row.appendChild(label);
+    row.appendChild(name);
+    el.appendChild(row);
+  }
+
+  // Очередь — всё после текущего
+  for (let i = tvPlaylistIdx + 1; i < tvPlaylist.length; i++) {
+    const item = tvPlaylist[i];
+    const row = document.createElement("div");
+    row.className = "tv-pl-item";
+    row.draggable = true;
+    row.dataset.idx = i;
+    const num = document.createElement("span");
+    num.className = "tv-pl-num";
+    num.textContent = i - tvPlaylistIdx;
+    const name = document.createElement("span");
+    name.className = "tv-pl-name";
+    name.textContent = item.title || item.videoId;
+    name.title = item.title || item.videoId;
+    const dur = document.createElement("span");
+    dur.className = "tv-pl-dur";
+    dur.textContent = item.dur ? fmtDur(item.dur) : "";
+    const rm = document.createElement("button");
+    rm.className = "tv-pl-rm";
+    rm.textContent = "✕";
+    rm.onclick = (e) => { e.stopPropagation(); tvRemoveFromPlaylist(i); };
+    row.appendChild(num);
+    row.appendChild(name);
+    row.appendChild(dur);
+    row.appendChild(rm);
+    row.onclick = () => tvPlayIdx(i);
+    row.ondragstart = (e) => { tvDragIdx = i; row.classList.add("dragging"); e.dataTransfer.effectAllowed = "move"; };
+    row.ondragend = () => { row.classList.remove("dragging"); tvDragIdx = -1; el.querySelectorAll(".drag-over").forEach((r) => r.classList.remove("drag-over")); };
+    row.ondragover = (e) => { e.preventDefault(); e.dataTransfer.dropEffect = "move"; row.classList.add("drag-over"); };
+    row.ondragleave = () => { row.classList.remove("drag-over"); };
+    row.ondrop = (e) => { e.preventDefault(); row.classList.remove("drag-over"); if (tvDragIdx >= 0 && tvDragIdx !== i) tvMoveItem(tvDragIdx, i); };
+    el.appendChild(row);
+  }
+}
+
+// ─── YouTube API + загрузка видео ─────────────────────────────────────
+window.onYouTubeIframeAPIReady = function() {
+  initTVPlayer();
+};
+
+function initTVPlayer() {
+  if (tvOverlay) return;
+  if (!window.YT || !YT.Player) return;
+
+  tvOverlay = document.createElement("div");
+  tvOverlay.id = "tvoverlay";
+  tvOverlay.style.width = TV_SCREEN_W * TV_PX_PER_UNIT + "px";
+  tvOverlay.style.height = TV_SCREEN_H * TV_PX_PER_UNIT + "px";
+  tvOverlay.style.background = "#000";
+  tvOverlay.style.pointerEvents = "auto"; // кнопки плеера YouTube кликабельны
+
+  const ytTarget = document.createElement("div");
+  ytTarget.style.width = "100%";
+  ytTarget.style.height = "100%";
+  tvOverlay.appendChild(ytTarget);
+
+  // Возвращаем проверенный путь: CSS3DObject привязан к экрану проектора.
+  // Позицию/поворот/перспективу считает браузерный 3D-конвейер (perspective +
+  // matrix3d от cssRenderer), а НЕ ручная проекция. Чтобы iframe не «пробивал»
+  // слой выше — у #tvoverlay нет position:fixed и z-index (см. CSS), он лежит
+  // строго внутри cssRenderer.domElement (z-index 2).
+  tvCSSObject = new CSS3DObject(tvOverlay);
+  tvCSSObject.scale.set(1 / TV_PX_PER_UNIT, 1 / TV_PX_PER_UNIT, 1 / TV_PX_PER_UNIT);
+  tvCSSObject.position.set(0, 0, 0.01);
+  tvCSSObject.visible = false;
+  (tvScreen || scene).add(tvCSSObject);
+
+  tvPlayer = new YT.Player(ytTarget, {
+    width: "100%",
+    height: "100%",
+    playerVars: { autoplay: 0, controls: 1, modestbranding: 1, rel: 0, playsinline: 1 },
+    events: {
+      onReady: () => {
+        tvPlayerReady = true;
+        if (tvWantVideoId) {
+          const st = tvPendingServerState;
+          tvPendingServerState = null;
+          let startPos = 0;
+          if (st) {
+            startPos = st.playing
+              ? (st.pos || 0) + (Date.now() - (st.ts || Date.now())) / 1000
+              : st.pos || 0;
+            tvPlaying = !!st.playing;
+          } else {
+            tvPlaying = true;
+          }
+          tvApplying = true;
+          try { tvPlayer.loadVideoById(tvWantVideoId, startPos); } catch {}
+          tvApplying = false;
+          tvWantVideoId = null;
+        }
+      },
+      onStateChange: (e) => {
+        if (tvApplying) return;
+        tvPState = e.data;
+        if (e.data === 1) {
+          tvPlaying = true;
+        } else if (e.data === 2) {
+          tvPlaying = false;
+          if (ws && ws.readyState === 1)
+            ws.send(JSON.stringify({ type: "tv", cmd: "pause", pos: tvPlayer.getCurrentTime() || 0 }));
+        } else if (e.data === 0) {
+          tvPlaying = false;
+          // Автопереход к следующему видео в плейлисте
+          if (tvPlaylistIdx >= 0 && tvPlaylistIdx < tvPlaylist.length - 1) {
+            tvPlayIdx(tvPlaylistIdx + 1);
+          } else {
+            if (ws && ws.readyState === 1) ws.send(JSON.stringify({ type: "tv", cmd: "pause", pos: 0 }));
+          }
+        }
+      },
+    },
+  });
+}
+
+function tvLoad(videoId, title) {
+  tvTrack = { videoId, title };
+  tvLoadedId = videoId;
+  tvCur = 0;
+  tvDur = 0;
+  const titleEl = document.getElementById("tv-title");
+  if (titleEl) titleEl.textContent = title || "";
+
+  // YouTube видео
+  if (tvPlayer && tvPlayerReady) {
+    tvApplying = true;
+    try { tvPlayer.loadVideoById(videoId, 0); } catch {}
+    tvApplying = false;
+    tvPlaying = true;
+  } else {
+    tvWantVideoId = videoId;
+  }
+}
+
+// Применение общего состояния TV от сервера
+function applyTVState(st) {
+  if (!st) return;
+  const now = Date.now();
+  const serverPos = st.playing ? (st.pos || 0) + (now - (st.ts || now)) / 1000 : st.pos || 0;
+
+  // Синхронизация плейлиста
+  if (Array.isArray(st.playlist)) {
+    tvPlaylist = st.playlist;
+    if (typeof st.playlistIdx === "number") tvPlaylistIdx = st.playlistIdx;
+    tvRenderPlaylist();
+  }
+
+  // Новый ролик — загружаем
+  if (st.videoId && st.videoId !== tvLoadedId) {
+    tvTrack = { videoId: st.videoId, title: st.title || "" };
+    tvLoadedId = st.videoId;
+
+    // YouTube видео
+    if (tvPlayer && tvPlayerReady) {
+      tvApplying = true;
+      try { tvPlayer.loadVideoById(st.videoId, serverPos); } catch {}
+      tvApplying = false;
+      tvPlaying = !!st.playing;
+    } else {
+      tvWantVideoId = st.videoId;
+      tvPendingServerState = st;
+    }
+    return;
+  }
+
+  if (!tvPlayer || !tvPlayerReady) return;
+
+  // Тот же ролик — синхронизируем позицию/воспроизведение (YouTube)
+  if (st.playing) {
+    tvPlaying = true;
+    if (tvPlayer.getPlayerState() !== 1) tvPlayNow();
+    const cur = tvPlayer.getCurrentTime() || 0;
+    if (Math.abs(cur - serverPos) > 2) {
+      tvApplying = true;
+      try { tvPlayer.seekTo(serverPos, true); } catch {}
+      tvApplying = false;
+    }
+  } else {
+    if (tvPlaying) {
+      tvPlaying = false;
+      tvApplying = true;
+      try { tvPlayer.pauseVideo(); } catch {}
+      tvApplying = false;
+    }
+  }
+}
+
+// Позиционирование iframe поверх экрана проектора + обновление пульта
+function tvTestIframe() {
+  let t = document.getElementById("tvtest");
+  if (t) {
+    t.remove();
+    return;
+  }
+  t = document.createElement("div");
+  t.id = "tvtest";
+  t.style.cssText =
+    "position:fixed;top:0;left:0;right:0;bottom:0;z-index:1000;background:#000;display:flex;align-items:center;justify-content:center;";
+  const fr = document.createElement("iframe");
+  fr.style.cssText = "width:80vw;height:45vw;max-height:80vh;border:0;background:#000;";
+  fr.src = "https://www.youtube.com/embed/dQw4w9WgXcQ?autoplay=1&mute=1&controls=1";
+  fr.allow = "autoplay; encrypted-media; picture-in-picture";
+  t.appendChild(fr);
+  t.onclick = () => t.remove();
+  document.body.appendChild(t);
+}
+// Позиционирование iframe поверх экрана проектора + обновление пульта
+function updateTVOverlay() {
+  if (!tvCSSObject) return;
+  // Экран мог появиться (buildFurniture асинхронный) уже после initTVPlayer() —
+  // допривязываем CSS3D-объект к нему, как только он готов.
+  if (tvScreen && tvCSSObject.parent !== tvScreen) {
+    tvScreen.add(tvCSSObject);
+  }
+  const show = tvTrack && tvPlayerReady && !dead && tvScreen;
+  tvCSSObject.visible = !!show;
+  // Позицию/поворот/перспективу считает cssRenderer.render(scene, camera)
+  // в animate() по matrixWorld экрана — ничего вручную не проектируем.
+}
+function updateTV(dt) {
+  const hint = document.getElementById("tvhint");
+  if (hint) hint.classList.toggle("show", sitting >= 0 && !tvOpen && !chatOpen && !dead);
+  updateTVOverlay();
+
+  if (tvPlayer && tvPlayerReady) {
+    try {
+      const cur = tvPlayer.getCurrentTime();
+      if (typeof cur === "number" && isFinite(cur) && cur >= 0) tvCur = cur;
+      const dur = tvPlayer.getDuration();
+      if (typeof dur === "number" && isFinite(dur) && dur > 0) {
+        tvDur = dur;
+        // Сохраняем длительность в плейлист
+        if (tvPlaylistIdx >= 0 && tvPlaylist[tvPlaylistIdx]) {
+          tvPlaylist[tvPlaylistIdx].dur = dur;
+        }
+      }
+      tvPState = tvPlayer.getPlayerState();
+    } catch {}
+  }
+
+  // Периодическая синхронизация реальной позиции с сервером (каждую секунду)
+  if (tvPlaying && tvLoadedId) {
+    tvSyncTimer += dt;
+    if (tvSyncTimer >= 1) {
+      tvSyncTimer = 0;
+      if (ws && ws.readyState === 1)
+        ws.send(JSON.stringify({ type: "tv", cmd: "sync", pos: tvCur, dur: tvDur }));
+    }
+  } else {
+    tvSyncTimer = 0;
+  }
+
+  const el = document.getElementById("tvmenu");
+  const pro = document.getElementById("tv-prog");
+  if (el && el.classList.contains("open") && pro) {
+    pro.max = tvDur || 0;
+    pro.value = tvCur;
+    const timeEl = document.getElementById("tv-time");
+    if (timeEl) timeEl.textContent = fmtDur(tvCur) + " / " + fmtDur(tvDur || 0);
+    const pb = document.getElementById("tv-play");
+    if (pb) pb.textContent = tvPlaying ? "❚❚" : "▶";
+  }
+}
+
+// Если API загрузился раньше, чем модуль назначил window.onYouTubeIframeAPIReady,
+// колбэк уже не вызовется — подстраховываемся опросом.
+function ensureTVPlayer() {
+  if (tvOverlay) return;
+  if (window.YT && YT.Player) {
+    initTVPlayer();
+    return;
+  }
+  if (!ensureTVPlayer._poll) {
+    ensureTVPlayer._poll = setInterval(() => {
+      if (window.YT && YT.Player) {
+        clearInterval(ensureTVPlayer._poll);
+        ensureTVPlayer._poll = null;
+        initTVPlayer();
+      }
+    }, 200);
+  }
+}
+
+function initTVUI() {
+  ensureTVPlayer();
+  const go = document.getElementById("tv-go");
+  if (go) go.onclick = tvDoSearch;
+  const s = document.getElementById("tv-search");
+  if (s) s.addEventListener("keydown", (e) => { if (e.key === "Enter") tvDoSearch(); });
+  const pb = document.getElementById("tv-play");
+  if (pb) pb.onclick = () => (tvPlaying ? tvPause() : tvResume());
+  const st = document.getElementById("tv-stop");
+  if (st) st.onclick = tvStop;
+  const pr = document.getElementById("tv-prog");
+  if (pr) pr.addEventListener("input", tvSeek);
+  const v = document.getElementById("tv-vol");
+  if (v) v.addEventListener("input", tvVol);
+  const prev = document.getElementById("tv-prev");
+  if (prev) prev.onclick = tvPrev;
+  const next = document.getElementById("tv-next");
+  if (next) next.onclick = tvNext;
+  const sh = document.getElementById("tv-shuffle");
+  if (sh) sh.onclick = tvShuffle;
+  const cl = document.getElementById("tv-clear");
+  if (cl) cl.onclick = tvClearPlaylist;
+}
+
 const colliders = [];
 const cameraColliders = []; // полки/стеллажи: блокируют камеру только на своей высоте
 const RADIUS = 0.26; // чуть больше — персонаж пошире
@@ -342,6 +1091,7 @@ function connectNet() {
         msg.radio ? msg.radio.station : -1,
         msg.radio ? msg.radio.volume : radioVolume,
       );
+      if (msg.tv) applyTVState(msg.tv);
       renderPlayerList();
     } else if (msg.type === "state") {
       const p = remotePlayers.get(msg.id);
@@ -366,6 +1116,20 @@ function connectNet() {
       else pushChatSystem(`${msg.who} — мы его потеряли`);
     } else if (msg.type === "radio") {
       applyRadioState(msg.station, msg.volume);
+    } else if (msg.type === "tv") {
+      if (msg.cmd === "playlistItems") {
+        const items = msg.items || [];
+        tvEnqueueBatch(items);
+        const el = document.getElementById("tv-import-loading");
+        if (el) el.style.display = "none";
+        pushChatSystem("Плейлист добавлен: " + items.length + " видео");
+      } else if (msg.cmd === "playlistError") {
+        const el = document.getElementById("tv-import-loading");
+        if (el) el.style.display = "none";
+        pushChatSystem("Ошибка: " + (msg.error || "Неизвестная ошибка"));
+      } else {
+        applyTVState(msg.state);
+      }
     }
   };
   ws.onclose = () => {
@@ -463,6 +1227,7 @@ function spawnRemotePlayer(msg) {
   if (remotePlayers.has(id)) return;
   const { group, refs } = createCharacter(remoteLook(msg));
   group.position.set(0, 0, 0);
+  group.layers.set(1); // удалённый игрок — слой 1 (поверх YouTube)
   scene.add(group);
   const entry = {
     group,
@@ -1264,21 +2029,55 @@ function roomCrouchReset() {
 // ---------------------------------------------------------------------------
 function init() {
   scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x0c0e10);
+  // фон задаётся через CSS body (alpha: true на рендере, чтобы iframe TV просвечивал)
 
   camera = new THREE.PerspectiveCamera(72, innerWidth / innerHeight, 0.1, 200);
-  renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance" });
+  renderer = new THREE.WebGLRenderer({ antialias: false, powerPreference: "high-performance", alpha: true });
   renderer.shadowMap.enabled = false;
   renderer.setPixelRatio(Math.min(devicePixelRatio, 1.2));
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.3;
   renderer.setSize(innerWidth, innerHeight);
+  renderer.domElement.style.position = "fixed";
+  renderer.domElement.style.top = "0";
+  renderer.domElement.style.left = "0";
+  renderer.domElement.style.zIndex = "1";
   document.body.appendChild(renderer.domElement);
+
+  // Второй WebGL-канвас — только для персонажей, поверх YouTube.
+  charRenderer = new THREE.WebGLRenderer({ antialias: false, alpha: true, powerPreference: "high-performance" });
+  charRenderer.setPixelRatio(Math.min(devicePixelRatio, 1.2));
+  charRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+  charRenderer.toneMappingExposure = 1.3;
+  charRenderer.setSize(innerWidth, innerHeight);
+  charRenderer.domElement.style.position = "fixed";
+  charRenderer.domElement.style.top = "0";
+  charRenderer.domElement.style.left = "0";
+  charRenderer.domElement.style.zIndex = "3";
+  charRenderer.domElement.style.pointerEvents = "none";
+  // Обязательный отдельный compositing-слой: иначе 3D-трансформированный iframe
+  // (cssRenderer ниже) в Chrome может отрисоваться поверх канваса персонажей.
+  charRenderer.domElement.style.willChange = "transform";
+  charRenderer.domElement.style.transform = "translateZ(0)";
+  document.body.appendChild(charRenderer.domElement);
+
+  // HTML-слой для YouTube-iframe экрана проектора (z-index 2: мир 1 < iframe 2 < персонажи 3).
+  // pointer-events:none на контейнере, чтобы пустая область не перехватывала
+  // клики по 3D-сцене; сам tvOverlay включает pointer-events обратно.
+  cssRenderer = new CSS3DRenderer();
+  cssRenderer.setSize(innerWidth, innerHeight);
+  cssRenderer.domElement.style.position = "fixed";
+  cssRenderer.domElement.style.top = "0";
+  cssRenderer.domElement.style.left = "0";
+  cssRenderer.domElement.style.zIndex = "2";
+  cssRenderer.domElement.style.pointerEvents = "none";
+  document.body.appendChild(cssRenderer.domElement);
 
   clock = new THREE.Clock();
 
   buildLights();
   buildRoom();
+  enableLightsForCharacters();
   buildFurniture();
   buildCharacter();
   character.position.set(-0.5, 0, 1.2);
@@ -1289,6 +2088,7 @@ function init() {
   connectNet();
   sfx.ambient(true); // лёгкий гул гаража (звук начнётся после первого клика)
   initGarageRadio();
+  initTVUI();
   pushChatSystem("Добро пожаловать в гараж! T — чат, E — сесть/встать, V — рация");
 
   addEventListener("keydown", (e) => {
@@ -1310,8 +2110,13 @@ function init() {
     if (e.code === "KeyT" && !e.repeat) toggleChat();
     if (e.code === "KeyV" && !e.repeat) radioStart();
     if (e.code === "KeyF" && !e.repeat) tryPunch();
+    if (e.code === "KeyR" && !e.repeat) toggleTV();
+    if (e.code === "KeyB" && !e.repeat) tvTestIframe();
     if (e.code === "Escape" && radioMenuOpen) {
       closeRadioMenu();
+    }
+    if (e.code === "Escape" && tvOpen) {
+      closeTV();
     }
   });
   addEventListener("keyup", (e) => {
@@ -1404,6 +2209,14 @@ function buildLights() {
     housing.rotation.z = Math.PI / 2;
     scene.add(housing);
   }
+}
+
+// Персонажи рисуются отдельным WebGL-канвасом (слой 1), поэтому источники
+// света должны светить и на слое 0 (мир), и на слое 1 (персонажи).
+function enableLightsForCharacters() {
+  scene.traverse((o) => {
+    if (o.isLight) o.layers.enable(1);
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -1873,6 +2686,7 @@ async function buildFurniture() {
       continue;
     }
     const root = build(d);
+    if (n === "экран_проектора") bindTVScreen(root);
     const x = d.pos[0],
       z = d.pos[2];
     if (n.startsWith("стул_")) {
@@ -2325,11 +3139,16 @@ function createCharacter(opts = {}) {
   refs.leftLeg = buildLeg(-1);
   refs.rightLeg = buildLeg(1);
 
+  // Все части персонажа — слой 1 (отдельный WebGL-канвас поверх YouTube).
+  // three.js проверяет layers по каждому объекту, поэтому недостаточно гру-
+  // ппы: прокидываем layer на всех потомков.
+  group.layers.set(1);
   group.scale.set(CHAR_X, CHAR_Y, CHAR_Z);
 
   // Реестр материалов для «покраснения» при ударе
   const mats = [];
   group.traverse((o) => {
+    o.layers.set(1);
     if (o.isMesh) {
       let m = o.material;
       if (!Array.isArray(m)) m = [m];
@@ -2367,6 +3186,7 @@ function buildCharacter() {
   rightLeg = refs.rightLeg;
   leftKnee = refs.leftKnee;
   rightKnee = refs.rightKnee;
+  character.layers.set(1); // персонаж — слой 1 (поверх YouTube)
   scene.add(character);
 }
 
@@ -2421,6 +3241,7 @@ function getCameraRelativeMovementVector() {
 function updatePlayer(dt) {
   if (chatOpen) return; // набор текста — игрок не двигается
   if (radioMenuOpen) return; // меню радио — управление заблокировано
+  if (tvOpen) return; // пульт TV — управление заблокировано
 
   // Обработка смерти: ждём 3 секунды (в неактивной вкладке RAF заморожен — афк не возрождается)
   if (dead) {
@@ -3049,6 +3870,9 @@ function updateCamera(dt) {
 }
 
 function onPointerDown(e) {
+  // Меню (радио/ТВ/чат) открыто — мышь свободна: не захватываем курсор,
+  // чтобы клики по кнопкам и слайдерам работали.
+  if (chatOpen || radioMenuOpen || tvOpen) return;
   // Pointer lock: клик захватывает курсор (Esc — показывает обратно).
   // Первый клик только захватывает, последующие бьют.
   if (e.button === 0) {
@@ -3056,7 +3880,7 @@ function onPointerDown(e) {
       renderer.domElement.requestPointerLock();
       return;
     }
-    if (!chatOpen && !radioMenuOpen) tryPunch();
+    tryPunch();
   }
 }
 function onPointerLockChange() {
@@ -3066,7 +3890,7 @@ function onPointerLockChange() {
 }
 document.addEventListener("pointerlockchange", onPointerLockChange);
 function onPointerMove(e) {
-  if (chatOpen || radioMenuOpen) return;
+  if (chatOpen || radioMenuOpen || tvOpen) return;
   // Движение мыши крутит камеру без нажатия.
   // Как в Sketchbook: фиксированная чувствительность (градусы на пиксель),
   // theta — горизонт, phi — вертикаль с широким диапазоном.
@@ -3080,6 +3904,7 @@ function onPointerMove(e) {
 }
 function onPointerUp() {}
 function onWheel(e) {
+  if (chatOpen || radioMenuOpen || tvOpen) return;
   // Плавный зум: цель радиуса, приближение догоняет её по кадрам
   camTargetRadius = Math.min(4.2, Math.max(0.9, camTargetRadius * (1 + e.deltaY * 0.001)));
 }
@@ -3091,6 +3916,8 @@ function onResize() {
   camera.aspect = innerWidth / innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight);
+  if (cssRenderer) cssRenderer.setSize(innerWidth, innerHeight);
+  if (charRenderer) charRenderer.setSize(innerWidth, innerHeight);
 }
 
 function animate() {
@@ -3098,6 +3925,7 @@ function animate() {
   const dt = Math.min(clock.getDelta(), 0.05);
   updatePlayer(dt);
   updateGarageRadio(dt);
+  updateTV(dt);
   updateAnim(dt);
   netClock += dt;
   syncSend(dt);
@@ -3120,7 +3948,18 @@ function animate() {
     const t = document.getElementById("wasted-t");
     if (t) t.textContent = Math.max(1, Math.ceil(deadT));
   }
+  // z-index 1: мир (стены, мебель, экран) — основной WebGL-канвас
+  camera.layers.enable(0);
+  camera.layers.disable(1);
   renderer.render(scene, camera);
+  // z-index 2: YouTube iframe — cssRenderer (matrixWorld экрана + браузерная перспектива)
+  if (cssRenderer) cssRenderer.render(scene, camera);
+  // z-index 3: персонажи — второй WebGL-канвас
+  camera.layers.disable(0);
+  camera.layers.enable(1);
+  if (charRenderer) charRenderer.render(scene, camera);
+  camera.layers.enable(0); // вернуть для следующего кадра
+  // z-index 4: чат + подписи игроков — HTML-слой
 }
 
 // Добавляем функцию для отладки в консоль

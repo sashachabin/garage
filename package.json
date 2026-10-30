@@ -8,15 +8,20 @@
   "type": "commonjs",
   "main": "server.js",
   "scripts": {
+    "build": "node build.mjs",
+    "prestart": "node build.mjs",
     "start": "node server.js",
     "lint": "oxlint --config .oxlintrc.json .",
     "format": "oxfmt --write .",
     "format:check": "oxfmt --check ."
   },
   "dependencies": {
-    "ws": "^8.21.3"
+    "three": "^0.160.0",
+    "ws": "^8.21.3",
+    "youtubei.js": "^18.0.0"
   },
   "devDependencies": {
+    "esbuild": "^0.25.12",
     "oxfmt": "^0.63.0",
     "oxlint": "^1.78.0"
   }

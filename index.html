@@ -5,10 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Гараж</title>
 <style>
-  html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, sans-serif; }
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, sans-serif; background: #0c0e10; }
   canvas { display: block; }
   #hud {
-    position: fixed; top: 12px; left: 12px; z-index: 10;
+    position: fixed; top: 12px; left: 12px; z-index: 5;
     background: rgba(0,0,0,.55); color: #fff; padding: 8px 12px;
     border-radius: 8px; font-size: 13px; line-height: 1.5; pointer-events: none;
     user-select: none;
@@ -22,7 +22,7 @@
 
   /* HUD в стиле GTA Vice City */
   #vicehud {
-    position: fixed; top: 12px; right: 12px; z-index: 10;
+    position: fixed; top: 12px; right: 12px; z-index: 5;
     width: 170px; pointer-events: none; user-select: none;
     font-family: Arial, Helvetica, sans-serif; text-shadow: 1px 1px 0 #000;
   }
@@ -49,7 +49,7 @@
   }
   .player-label {
   position: fixed;
-  z-index: 999;
+  z-index: 4;
   pointer-events: none;
   background: transparent;
   color: #fff;
@@ -112,7 +112,7 @@
 
   /* Чат */
   #chat {
-    position: fixed; bottom: 12px; left: 12px; z-index: 11; width: 320px; max-width: 85vw;
+    position: fixed; bottom: 12px; left: 12px; z-index: 4; width: 320px; max-width: 85vw;
     font-size: 13px;
   }
   #chatlog {
@@ -126,7 +126,7 @@
 
   /* Чат-пузырь над головой игрока */
   .chat-bubble {
-    position: fixed; z-index: 14; display: none; max-width: 260px;
+    position: fixed; z-index: 4; display: none; max-width: 260px;
     background: rgba(15,15,18,.85); color: #fff; padding: 5px 12px;
     border-radius: 14px; font-size: 12px; line-height: 1.3;
     transform: translate(-50%, -100%); pointer-events: none; user-select: none;
@@ -142,7 +142,7 @@
   }
 
   #radio {
-    position: fixed; bottom: 12px; right: 12px; z-index: 12;
+    position: fixed; bottom: 12px; right: 12px; z-index: 5;
     background: rgba(0,0,0,.55); color: #aaa; padding: 6px 12px;
     border-radius: 20px; font-size: 12px; pointer-events: none; user-select: none;
     transition: background .15s;
@@ -151,7 +151,7 @@
 
   /* ─── Меню радио — музыкальный центр (00-е) ─── */
   #radiomenu {
-    position: fixed; left: 50%; top: 50%; z-index: 25;
+    position: fixed; left: 50%; top: 50%; z-index: 10;
     transform: translate(-50%, -50%);
     width: 370px; display: none; user-select: none;
   }
@@ -228,11 +228,11 @@
 
   /* Лёгкая виньетка — иммерсивность */
   #vignette {
-    position: fixed; inset: 0; z-index: 14; pointer-events: none;
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 5; pointer-events: none;
     background: radial-gradient(ellipse at center, rgba(0,0,0,0) 52%, rgba(0,0,0,.42) 100%);
   }
   #radiohint {
-    position: fixed; bottom: 40px; left: 50%; z-index: 12;
+    position: fixed; bottom: 40px; left: 50%; z-index: 5;
     transform: translateX(-50%); background: rgba(0,0,0,.6);
     color: #ffe08a; padding: 5px 14px; border-radius: 14px; font-size: 13px;
     pointer-events: none; user-select: none; display: none;
@@ -241,21 +241,21 @@
 
   #curhint {
     position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
-    z-index: 20; color: #fff; background: rgba(0,0,0,.55);
+    z-index: 5; color: #fff; background: rgba(0,0,0,.55);
     padding: 6px 14px; border-radius: 8px; font-size: 13px;
     pointer-events: none; user-select: none; display: none;
   }
 
   /* Вспышка при ударе */
   #hitflash {
-    position: fixed; inset: 0; z-index: 20; pointer-events: none; opacity: 0;
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10; pointer-events: none; opacity: 0;
     background: radial-gradient(circle, rgba(255,60,40,0) 55%, rgba(255,40,30,.35));
   }
   #hitflash.on { opacity: 1; }
 
   /* Экран смерти в стиле GTA */
   #wasted {
-    position: fixed; inset: 0; z-index: 30; pointer-events: none;
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 10; pointer-events: none;
     background: rgba(140,10,10,.18);
     display: flex; flex-direction: column; align-items: center; justify-content: center;
     color: #ff3b30; text-shadow: 0 4px 24px rgba(0,0,0,.9);
@@ -272,7 +272,7 @@
 
   /* Турнирная таблица (deathmatch) */
   #board {
-    position: fixed; right: 12px; top: 220px; z-index: 10; width: 190px;
+    position: fixed; right: 12px; top: 220px; z-index: 5; width: 190px;
     pointer-events: none; user-select: none;
     font-family: Arial, Helvetica, sans-serif; text-shadow: 1px 1px 0 #000;
     background: rgba(20,20,20,.72); border: 1px solid rgba(255,255,255,.25);
@@ -299,7 +299,7 @@
 
   .player-label {
   position: fixed;
-  z-index: 999;
+  z-index: 4;
   pointer-events: none;
   transform: translate(-50%, -100%);
   background: transparent;
@@ -360,6 +360,110 @@
   text-shadow: 0 1px 3px rgba(0,0,0,0.9);
   font-weight: bold;
 }
+
+  /* Пульт синхронного экрана (TV) */
+  #tvmenu {
+    display: none; position: fixed; right: 18px; bottom: 18px; width: 380px; z-index: 10;
+  }
+  #tvmenu.open { display: block; }
+  .tv-face {
+    background: linear-gradient(180deg, #3a3d44, #2a2c31 60%, #1d1f23);
+    border: 1px solid #0a0b0c; border-radius: 14px; padding: 14px;
+    box-shadow: 0 18px 50px rgba(0,0,0,.65), inset 0 1px 0 rgba(255,255,255,.16);
+  }
+  .tv-head {
+    font-size: 11px; letter-spacing: 2px; color: #9fb4c8; margin-bottom: 10px;
+    font-weight: 700; border-bottom: 1px solid rgba(255,255,255,.1); padding-bottom: 8px;
+  }
+  .tv-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+  .tv-row input[type=text], #tv-search {
+    flex: 1; min-width: 0; background: #101215; color: #fff; border: 1px solid #0a0b0c;
+    border-radius: 6px; padding: 7px 9px; font-size: 12px;
+  }
+  .tv-row input[type=range] {
+    flex: 1; -webkit-appearance: none; appearance: none; height: 6px; border-radius: 4px;
+    background: linear-gradient(180deg, #1a1c1f, #2e3136); cursor: pointer;
+  }
+  .tv-row input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 14px; height: 14px; border-radius: 50%;
+    background: linear-gradient(180deg, #ffe08a, #b8860b); border: 1px solid #000;
+  }
+  #tv-go {
+    background: linear-gradient(180deg, #4d5057, #36393f); color: #fff; border: 1px solid #141518;
+    border-radius: 6px; padding: 7px 12px; font-size: 12px; cursor: pointer;
+  }
+  #tv-go:hover { filter: brightness(1.18); }
+  #tv-results { max-height: 190px; overflow-y: auto; margin-top: 10px; }
+  #tv-results .tv-item {
+    display: block; width: 100%; text-align: left; overflow: hidden; white-space: nowrap;
+    text-overflow: ellipsis; background: #202328; color: #e8e8e8; border: 1px solid #121418;
+    border-radius: 6px; padding: 7px 9px; font-size: 11px; margin-bottom: 5px; cursor: pointer;
+  }
+  #tv-results button.tv-item:hover { background: #2b2f36; }
+  .tv-note { color: #7fa3c9; font-size: 11px; padding: 4px 2px; }
+  .tv-now {
+    margin-top: 10px; background: #101215; border-radius: 8px; padding: 9px 10px;
+    border: 1px solid #0a0b0c;
+  }
+  .tv-title { display: block; color: #ffd479; font-size: 12px; line-height: 1.35; max-height: 2.6em; overflow: hidden; }
+  .tv-btns { display: flex; gap: 8px; margin-top: 8px; }
+  .tv-btns button {
+    flex: 1; background: linear-gradient(180deg, #4d5057, #36393f); color: #fff;
+    border: 1px solid #141518; border-radius: 6px; padding: 8px 0; font-size: 13px; cursor: pointer;
+  }
+  .tv-btns button:hover { filter: brightness(1.18); }
+  .tv-pl { max-height: 240px; overflow-y: auto; margin-top: 4px; }
+  .tv-pl:empty { display: none; }
+  .tv-pl-head {
+    display: flex; align-items: center; gap: 4px; margin-top: 6px;
+    font-size: 10px; color: #666; text-transform: uppercase; letter-spacing: 1px;
+  }
+  .tv-pl-head button {
+    background: none; border: 1px solid #222; border-radius: 4px;
+    color: #888; padding: 2px 6px; font-size: 12px; cursor: pointer;
+  }
+  .tv-pl-head button:hover { background: #222; color: #ccc; }
+  .tv-pl-item .tv-pl-label { color: #8ab4f8; font-size: 10px; min-width: 14px; }
+  .tv-pl-item {
+    display: flex; align-items: center; gap: 6px; padding: 5px 7px; margin-bottom: 3px;
+    background: #181a1e; border: 1px solid #121418; border-radius: 5px; cursor: pointer;
+    font-size: 11px; color: #ccc; transition: background .1s, border-color .1s;
+  }
+  .tv-pl-item:hover { background: #22262c; }
+  .tv-pl-item.current {
+    background: #2a3040; border-color: #4a6a9a; color: #fff;
+    cursor: default; margin-bottom: 6px; padding-bottom: 8px;
+    border-bottom: 1px solid #333;
+  }
+  .tv-pl-item.active { background: #2a3040; border-color: #4a6a9a; color: #fff; }
+  .tv-pl-item.drag-over { border-color: #8ab4f8; border-style: dashed; }
+  .tv-pl-item.dragging { opacity: 0.3; }
+  .tv-pl-num { color: #666; min-width: 16px; text-align: right; }
+  .tv-pl-item.active .tv-pl-num { color: #8ab4f8; }
+  .tv-pl-name { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .tv-pl-dur { color: #666; font-size: 10px; font-family: monospace; white-space: nowrap; }
+  .tv-pl-rm {
+    background: none; border: none; color: #666; cursor: pointer; font-size: 12px;
+    padding: 0 3px; line-height: 1;
+  }
+  .tv-pl-rm:hover { color: #e44; }
+  .tv-search-row { position: relative; }
+  .tv-search-row .tv-import-loading { position: absolute; right: 40px; top: 50%; transform: translateY(-50%); font-size: 12px; }
+  .tv-time { color: #8a8f98; font-size: 11px; font-family: monospace; white-space: nowrap; }
+  .tv-volrow span { color: #9fb4c8; font-size: 11px; letter-spacing: 1px; }
+  #tv-note { color: #ffb13c; font-size: 11px; margin-top: 8px; min-height: 13px; }
+  #tvhint {
+    position: fixed; left: 50%; bottom: 26px; transform: translateX(-50%); z-index: 5;
+    background: rgba(0,0,0,.65); color: #ffe08a; padding: 6px 14px; border-radius: 20px;
+    font-size: 13px; letter-spacing: 1px; pointer-events: none; display: none;
+    border: 1px solid rgba(255,255,255,.18);
+  }
+  #tvhint.show { display: block; }
+  #tvoverlay {
+    position: absolute; z-index: auto; pointer-events: auto; overflow: hidden;
+    background: #000; box-shadow: 0 0 0 1px rgba(255,255,255,.08);
+  }
+  #tvoverlay iframe { width: 100%; height: 100%; border: 0; display: block; }
 </style>
 </head>
 <body>
@@ -394,6 +498,44 @@
 </div>
 <audio id="garageradio" preload="none"></audio>
 
+<div id="tvhint">R — пульт экрана</div>
+<div id="tvmenu">
+  <div class="tv-face">
+    <div class="tv-head">ПУЛЬТ · экран проектора</div>
+    <div class="tv-row tv-search-row">
+      <input id="tv-search" type="text" placeholder="YouTube URL / плейлист…" />
+      <button id="tv-go">+</button>
+      <span id="tv-import-loading" class="tv-import-loading" style="display:none">⏳</span>
+    </div>
+    <div class="tv-now">
+      <span class="tv-title" id="tv-title"></span>
+      <div class="tv-btns">
+        <button id="tv-prev">⏮</button>
+        <button id="tv-play">▶</button>
+        <button id="tv-stop">■</button>
+        <button id="tv-next">⏭</button>
+      </div>
+    </div>
+    <div class="tv-pl-head" id="tv-pl-head" style="display:none">
+      <span class="tv-pl-label">Очередь</span>
+      <button id="tv-shuffle" title="Перемешать">🔀</button>
+      <button id="tv-clear" title="Очистить">🗑</button>
+    </div>
+    <div class="tv-pl" id="tv-pl"></div>
+    <div id="tv-dbg" style="font-size:10px;color:#777;margin-top:6px;min-height:12px"></div>
+    <div class="tv-row">
+      <input type="range" id="tv-prog" min="0" max="0" value="0" step="1" />
+      <span class="tv-time" id="tv-time">0:00 / 0:00</span>
+    </div>
+    <div class="tv-row tv-volrow">
+      <span>🔊</span>
+      <input type="range" id="tv-vol" min="0" max="1" step="0.01" value="0.5" />
+    </div>
+    <div id="tv-note"></div>
+    <div id="tv-results"></div>
+  </div>
+</div>
+
 <div id="wasted" hidden>
   <div id="wasted-text">МЫ ПОТЕРЯЛИ ТЕБЯ</div>
   <div id="wasted-sub">Возрождение через <b id="wasted-t">3</b>…</div>
@@ -401,15 +543,8 @@
 
 <audio id="audiopeer" autoplay></audio>
 
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-  }
-}
-</script>
-
-<script type="module" src="main.js"></script>
+<script src="https://www.youtube.com/iframe_api"></script>
+<script type="module" src="/dist/eruda.js"></script>
+<script type="module" src="/dist/main.js"></script>
 </body>
 </html>
