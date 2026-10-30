@@ -4,7 +4,9 @@ const path = require("path");
 const { WebSocketServer } = require("ws");
 const { Innertube } = require("youtubei.js");
 
-const PORT = process.env.PORT || 8223;
+// APP_PORT / APP_IP задаёт хостинг (netangels)
+const PORT = process.env.PORT || process.env.APP_PORT || 8223;
+const HOST = process.env.APP_IP || "0.0.0.0";
 const ROOT = __dirname;
 const MIME = {
   ".html": "text/html; charset=utf-8",
@@ -296,6 +298,6 @@ wss.on("connection", (ws) => {
   });
 });
 
-server.listen(PORT, "0.0.0.0", () => {
+server.listen(PORT, HOST, () => {
   console.log(`Сервер гаража: http://localhost:${PORT}`);
 });
