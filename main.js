@@ -1034,7 +1034,7 @@ const PLAYER_COLORS = [
   { body: 0x16a085, sleeve: 0x0f6657, pants: 0x384257 },
   { body: 0x34495e, sleeve: 0x1f2c3a, pants: 0x2d3a4f },
 ];
-const SKIN_TONES = [0xf0c79b, 0xe3a86e, 0xc88749, 0x8f5a2c, 0x9c6434, 0xd3a058];
+const SKIN_TONES = [0xf0c79b, 0xe3a86e, 0xd3a058, 0xc88749, 0x9c6434, 0x8f5a2c, 0x6b4423, 0x4a2c17, 0x33200f];
 const HAIR_COLORS = [0x2b1a0f, 0x50341c, 0x1f1208, 0x8a5a2b, 0x44323a, 0x6b3a1e];
 
 let myId = null,
@@ -1178,7 +1178,7 @@ function ownState() {
     z: +character.position.z.toFixed(3),
     r: +rotYaw.toFixed(3),
     s: +moveSpeed.toFixed(3),
-    run: +(keys["ShiftLeft"] || keys["ShiftRight"]) ? 1 : 0,
+    run: keys["ShiftLeft"] || keys["ShiftRight"] || touchRunning() ? 1 : 0,
     sit: sitting >= 0 ? 1 : 0,
     at: +animTime.toFixed(3),
     hp: Math.max(0, Math.round(hp)),
@@ -1250,7 +1250,10 @@ function submitLobby() {
 function enterGarage(nick) {
   wantedNick = nick;
   lobbyOpen = false;
-  document.getElementById("lobby").classList.remove("open");
+  // Ворота уезжают вверх, потом экран убираем совсем
+  const el = document.getElementById("lobby");
+  el.classList.add("up");
+  setTimeout(() => el.classList.remove("open", "up"), 1000);
   connectNet();
 }
 
@@ -1372,6 +1375,11 @@ function openAvatar() {
   document.getElementById("avatar").classList.add("open");
   if (!document.getElementById("av-rows").childElementCount) buildAvatarUI();
   if (!avatarPrev) initAvatarPreview();
+  // Размер канваса зависит от раскладки (телефон/десктоп) — подгоняем при каждом открытии
+  const cv = avatarPrev.renderer.domElement;
+  avatarPrev.renderer.setSize(cv.clientWidth, cv.clientHeight, false);
+  avatarPrev.camera.aspect = cv.clientWidth / cv.clientHeight;
+  avatarPrev.camera.updateProjectionMatrix();
   avatarDraft = Object.assign({}, LOOK_DEFAULTS, myLook);
   document.getElementById("av-nick").value = myNick || "";
   document.getElementById("av-err").textContent = "";
@@ -2331,6 +2339,7 @@ function init() {
 
   openLobby();
   document.getElementById("avbtn").onclick = () => openAvatar();
+  initTouchControls();
   sfx.ambient(true); // лёгкий гул гаража (звук начнётся после первого клика)
   initGarageRadio();
   initTVUI();
@@ -3522,6 +3531,9 @@ let camTheta = -0.22,
   camTargetRadius = 1.9; // старт: камера по центру (на уровне глаз), небольшой градус по X
 let lastMX = 0,
   lastMY = 0;
+// Сенсорный джойстик: x — вправо, y — вперёд (-1..1); бег при сильном наклоне
+const touchMove = { x: 0, y: 0 };
+const touchRunning = () => touchMove.x * touchMove.x + touchMove.y * touchMove.y > 0.85 * 0.85;
 
 function getCameraRelativeMovementVector() {
   // Управление относительно камеры (как viewVector в Sketchbook):
@@ -3536,6 +3548,10 @@ function getCameraRelativeMovementVector() {
   if (keys["KeyS"] || keys["ArrowDown"]) mv.sub(fwd);
   if (keys["KeyD"] || keys["ArrowRight"]) mv.add(right);
   if (keys["KeyA"] || keys["ArrowLeft"]) mv.sub(right);
+  if (touchMove.x || touchMove.y) {
+    mv.addScaledVector(fwd, touchMove.y);
+    mv.addScaledVector(right, touchMove.x);
+  }
   return mv;
 }
 
@@ -3576,14 +3592,16 @@ function updatePlayer(dt) {
       keys["ArrowDown"] ||
       keys["ArrowLeft"] ||
       keys["ArrowRight"] ||
-      keys["KeyC"]
+      keys["KeyC"] ||
+      touchMove.x ||
+      touchMove.y
     )
       standUp();
     return;
   }
 
   // Целевая скорость (крадучись — на корточках)
-  const run = keys["ShiftLeft"] || keys["ShiftRight"];
+  const run = keys["ShiftLeft"] || keys["ShiftRight"] || touchRunning();
   const targetSpeed = crouched ? MOVE_WALK * 0.55 : run ? MOVE_RUN : MOVE_WALK;
   const dir = getCameraRelativeMovementVector();
 
@@ -3786,7 +3804,7 @@ function updateAnim(dt) {
     // Плавно меняем амплитуду приседа
     crouch += ((crouched ? 1 : 0) - crouch) * Math.min(1, 14 * dt);
 
-    const run = !!(keys["ShiftLeft"] || keys["ShiftRight"]);
+    const run = !!(keys["ShiftLeft"] || keys["ShiftRight"] || touchRunning());
     const t = animTime;
     const s = Math.sin(t),
       c = Math.cos(t);
@@ -4172,6 +4190,7 @@ function updateCamera(dt) {
 }
 
 function onPointerDown(e) {
+  if (e.pointerType === "touch") return; // на телефоне — свои сенсорные контролы
   // Меню (радио/ТВ/чат) открыто — мышь свободна: не захватываем курсор,
   // чтобы клики по кнопкам и слайдерам работали.
   if (chatOpen || radioMenuOpen || tvOpen || lobbyOpen || avatarOpen) return;
@@ -4192,6 +4211,7 @@ function onPointerLockChange() {
 }
 document.addEventListener("pointerlockchange", onPointerLockChange);
 function onPointerMove(e) {
+  if (e.pointerType === "touch") return;
   if (chatOpen || radioMenuOpen || tvOpen || lobbyOpen || avatarOpen) return;
   // Движение мыши крутит камеру без нажатия.
   // Как в Sketchbook: фиксированная чувствительность (градусы на пиксель),
@@ -4205,6 +4225,134 @@ function onPointerMove(e) {
   camPhi = Math.min(1.25, Math.max(-0.5, camPhi + (sitting >= 0 ? -dy : dy) * 0.0048));
 }
 function onPointerUp() {}
+
+// ---------------------------------------------------------------------------
+// Сенсорное управление (телефон): джойстик слева, обзор свайпом справа, кнопки
+// ---------------------------------------------------------------------------
+const isTouch = "ontouchstart" in window || navigator.maxTouchPoints > 0;
+const touchUiBlocked = () => chatOpen || radioMenuOpen || tvOpen || lobbyOpen || avatarOpen;
+
+function initTouchControls() {
+  if (!isTouch) return;
+  document.body.classList.add("touch");
+  const stick = document.getElementById("tc-stick");
+  const knob = document.getElementById("tc-knob");
+  const R = 50; // радиус хода ручки, px
+  let stickId = null,
+    sx = 0,
+    sy = 0;
+  let lookId = null,
+    lx = 0,
+    ly = 0;
+
+  function setKnob(dx, dy) {
+    knob.style.transform = `translate(${dx}px, ${dy}px)`;
+  }
+  function releaseStick() {
+    stickId = null;
+    touchMove.x = touchMove.y = 0;
+    setKnob(0, 0);
+    stick.classList.remove("active");
+  }
+
+  // Джойстик появляется там, где коснулись левой половины экрана
+  addEventListener(
+    "touchstart",
+    (e) => {
+      if (touchUiBlocked()) return;
+      for (const t of e.changedTouches) {
+        if (t.target.closest && t.target.closest(".tc-btn, #avbtn, #chat")) continue;
+        if (t.clientX < innerWidth * 0.45 && stickId === null) {
+          stickId = t.identifier;
+          sx = t.clientX;
+          sy = t.clientY;
+          stick.style.left = sx - 60 + "px";
+          stick.style.top = sy - 60 + "px";
+          stick.classList.add("active");
+        } else if (t.clientX >= innerWidth * 0.45 && lookId === null) {
+          lookId = t.identifier;
+          lx = t.clientX;
+          ly = t.clientY;
+        }
+      }
+    },
+    { passive: true },
+  );
+  addEventListener(
+    "touchmove",
+    (e) => {
+      if (stickId === null && lookId === null) return;
+      for (const t of e.changedTouches) {
+        if (t.identifier === stickId) {
+          let dx = t.clientX - sx,
+            dy = t.clientY - sy;
+          const d = Math.hypot(dx, dy);
+          if (d > R) {
+            dx = (dx / d) * R;
+            dy = (dy / d) * R;
+          }
+          setKnob(dx, dy);
+          const dead = d < R * 0.12; // мёртвая зона 12%
+          touchMove.x = dead ? 0 : dx / R;
+          touchMove.y = dead ? 0 : -dy / R;
+        } else if (t.identifier === lookId && !touchUiBlocked()) {
+          camTheta -= (t.clientX - lx) * 0.009;
+          const dy = t.clientY - ly;
+          camPhi = Math.min(1.25, Math.max(-0.5, camPhi + (sitting >= 0 ? -dy : dy) * 0.007));
+          lx = t.clientX;
+          ly = t.clientY;
+        }
+      }
+    },
+    { passive: true },
+  );
+  const end = (e) => {
+    for (const t of e.changedTouches) {
+      if (t.identifier === stickId) releaseStick();
+      if (t.identifier === lookId) lookId = null;
+    }
+  };
+  addEventListener("touchend", end);
+  addEventListener("touchcancel", end);
+
+  // Кнопки: data-key — «зажатая клавиша», data-act — разовое действие
+  const acts = {
+    punch: () => tryPunch(),
+    chat: () => toggleChat(),
+    tv: () => toggleTV(),
+    avatar: () => openAvatar(),
+  };
+  for (const b of document.querySelectorAll(".tc-btn")) {
+    const code = b.dataset.key;
+    const act = b.dataset.act;
+    b.addEventListener("touchstart", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      unlock();
+      b.classList.add("down");
+      if (code) {
+        keys[code] = true;
+        if (code === "KeyV") radioStart();
+      }
+      if (act && acts[act]) acts[act]();
+    });
+    const up = (e) => {
+      e.preventDefault();
+      b.classList.remove("down");
+      if (code) {
+        keys[code] = false;
+        if (code === "KeyV") radioStop();
+      }
+    };
+    b.addEventListener("touchend", up);
+    b.addEventListener("touchcancel", up);
+  }
+
+  // Открылось меню — отпускаем джойстик, чтобы персонаж не ушёл сам
+  setInterval(() => {
+    if (touchUiBlocked() && stickId !== null) releaseStick();
+  }, 200);
+}
 function onWheel(e) {
   if (chatOpen || radioMenuOpen || tvOpen || lobbyOpen || avatarOpen) return;
   // Плавный зум: цель радиуса, приближение догоняет её по кадрам

@@ -2,8 +2,10 @@
 <html lang="ru">
 <head>
 <meta charset="utf-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no" />
 <title>Гараж</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link href="https://fonts.googleapis.com/css2?family=Russo+One&display=swap" rel="stylesheet" />
 <style>
   html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, sans-serif; background: #0c0e10; }
   canvas { display: block; }
@@ -466,12 +468,90 @@
   #tvoverlay iframe { width: 100%; height: 100%; border: 0; display: block; }
 
   /* ─── Экран входа и редактор персонажа ─── */
-  #lobby, #avatar {
+  #avatar {
     position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 20; display: none;
     align-items: center; justify-content: center;
     background: rgba(8,9,11,.62); font-family: Arial, Helvetica, sans-serif; color: #e8e8e8;
   }
-  #lobby.open, #avatar.open { display: flex; }
+  #avatar.open { display: flex; }
+
+  /* Стартовый экран — рифлёные гаражные ворота, уезжают вверх при входе */
+  #lobby {
+    position: fixed; top: 0; left: 0; right: 0; bottom: 0; z-index: 20; display: none; overflow: hidden;
+    font-family: 'Russo One', Arial, Helvetica, sans-serif;
+  }
+  #lobby.open { display: block; }
+  #lobby.open ~ #touchui, #lobby.open ~ #avbtn { display: none; }
+  .gd-door {
+    position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+    display: flex; align-items: center; justify-content: center;
+    background:
+      linear-gradient(180deg, rgba(0,0,0,.35), rgba(0,0,0,0) 25%, rgba(0,0,0,0) 70%, rgba(60,35,10,.45)),
+      linear-gradient(90deg, rgba(0,0,0,.28), rgba(0,0,0,0) 12%, rgba(0,0,0,0) 88%, rgba(0,0,0,.28)),
+      repeating-linear-gradient(180deg, #9aa0a6 0, #c3c8cd 5px, #8a9097 11px, #5f656c 15px, #858b92 18px);
+    box-shadow: 0 10px 30px rgba(0,0,0,.7);
+    transition: transform .95s cubic-bezier(.55,0,.35,1);
+  }
+  #lobby.up .gd-door { transform: translateY(-100%); }
+  .gd-bottom {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 40px;
+    background: linear-gradient(180deg, #4b5056, #2c3035);
+    border-top: 2px solid #1d2024;
+  }
+  .gd-handle {
+    position: absolute; left: 50%; top: 9px; width: 110px; height: 12px; margin-left: -55px;
+    border-radius: 6px; background: linear-gradient(180deg, #d9dde1, #7d838a); box-shadow: 0 2px 3px rgba(0,0,0,.6);
+  }
+  .gd-hazard {
+    position: absolute; left: 0; right: 0; bottom: 40px; height: 14px;
+    background: repeating-linear-gradient(-45deg, #f2c200 0 14px, #161616 14px 28px);
+    box-shadow: 0 -1px 0 rgba(0,0,0,.5);
+  }
+  .gd-plate {
+    position: relative; width: 340px; max-width: calc(100vw - 32px); box-sizing: border-box;
+    margin-bottom: 40px; padding: 22px 24px 18px; text-align: center; color: #f3f1ea;
+    background: linear-gradient(180deg, #24406b, #1a2f50);
+    border-radius: 6px; box-shadow: 0 6px 0 #0f1c30, 0 14px 30px rgba(0,0,0,.55);
+  }
+  .gd-plate::before {
+    content: ''; position: absolute; top: 7px; left: 7px; right: 7px; bottom: 7px;
+    border: 2px solid rgba(243,241,234,.85); border-radius: 3px; pointer-events: none;
+  }
+  .gd-rivet { position: absolute; width: 7px; height: 7px; border-radius: 50%;
+    background: radial-gradient(circle at 35% 35%, #fff, #8d939a 60%, #3c4147); }
+  .gd-title { font-size: 46px; letter-spacing: 8px; line-height: 1; margin: 6px 0 4px; text-indent: 8px; }
+  .gd-sub { font-family: Arial, Helvetica, sans-serif; font-size: 11px; letter-spacing: 3px; text-transform: uppercase; opacity: .8; }
+  .gd-numplate {
+    display: flex; height: 52px; margin: 20px 0 0; background: #f4f4ef; border: 3px solid #111;
+    border-radius: 7px; box-shadow: inset 0 0 0 2px #f4f4ef, inset 0 0 0 3px #111; overflow: hidden;
+  }
+  .gd-numplate input {
+    flex: 1; min-width: 0; border: 0; outline: none; background: transparent; color: #111;
+    font: 26px 'Russo One', Arial, sans-serif; text-align: center; padding: 0 8px;
+  }
+  .gd-numplate input::placeholder { color: #9b9b95; }
+  .gd-rus {
+    width: 50px; border-left: 2px solid #111; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; color: #111; font-size: 13px;
+  }
+  .gd-flag { width: 24px; height: 14px; margin-top: 3px; border: 1px solid #111;
+    background: linear-gradient(180deg, #fff 0 33%, #1c57a5 33% 66%, #d52b1e 66%); }
+  #lobby .lb-err { font-family: Arial, Helvetica, sans-serif; color: #ffb4a8; text-align: left; margin: 6px 2px 2px; }
+  .gd-open {
+    display: block; width: 100%; margin-top: 8px; padding: 13px 0; cursor: pointer;
+    font: 16px 'Russo One', Arial, sans-serif; letter-spacing: 2px; text-transform: uppercase;
+    color: #161616; background: #f2c200; border: 0; border-radius: 4px; box-shadow: 0 4px 0 #8f7300;
+  }
+  .gd-open:active { transform: translateY(3px); box-shadow: 0 1px 0 #8f7300; }
+  .gd-guest {
+    margin-top: 12px; background: none; border: 0; cursor: pointer; padding: 4px;
+    font: 12px Arial, Helvetica, sans-serif; color: rgba(243,241,234,.75); text-decoration: underline;
+  }
+  @media (max-height: 420px) {
+    .gd-plate { padding: 14px 20px 12px; margin-bottom: 30px; }
+    .gd-title { font-size: 34px; }
+    .gd-numplate { margin-top: 12px; height: 46px; }
+  }
   .lb-card {
     background: linear-gradient(180deg, #2b2d32, #18191c); border: 1px solid #0a0b0c;
     border-radius: 14px; padding: 22px 24px; width: 320px; max-width: calc(100vw - 32px);
@@ -520,6 +600,44 @@
   @media (max-width: 640px) {
     #av-canvas { width: 100%; height: 200px; margin: 0 0 12px; }
   }
+  /* ─── Сенсорное управление (телефон) ─── */
+  #touchui { display: none; }
+  body.touch #touchui { display: block; }
+  body.touch { touch-action: none; -webkit-user-select: none; user-select: none; }
+  body.touch #curhint { display: none !important; }
+  #tc-stick {
+    position: fixed; left: 40px; bottom: 60px; width: 120px; height: 120px; z-index: 6;
+    border-radius: 50%; background: rgba(255,255,255,.08); border: 2px solid rgba(255,255,255,.22);
+    pointer-events: none; opacity: .55;
+  }
+  #tc-stick.active { opacity: 1; }
+  #tc-knob {
+    position: absolute; left: 35px; top: 35px; width: 50px; height: 50px; border-radius: 50%;
+    background: rgba(255,224,138,.75); box-shadow: 0 2px 8px rgba(0,0,0,.5);
+  }
+  #tc-btns {
+    position: fixed; right: 14px; bottom: 18px; z-index: 6; width: 196px; text-align: right;
+  }
+  .tc-btn {
+    display: inline-block; width: 58px; height: 58px; margin: 0 0 8px 6px; border-radius: 50%;
+    background: rgba(0,0,0,.55); border: 2px solid rgba(255,255,255,.25); color: #fff;
+    font: bold 13px Arial, Helvetica, sans-serif; line-height: 54px; text-align: center;
+    vertical-align: bottom; touch-action: none; box-sizing: border-box;
+  }
+  .tc-btn.big { width: 72px; height: 72px; line-height: 68px; font-size: 26px; }
+  .tc-btn.down { background: rgba(255,224,138,.8); color: #1a1408; }
+  #tc-top { position: fixed; right: 12px; top: 12px; z-index: 6; }
+  #tc-top .tc-btn { width: 44px; height: 44px; line-height: 40px; font-size: 18px; margin: 0 0 0 6px; }
+  body.touch #avbtn { display: none; }
+  body.touch #radio { display: none; }
+  @media (max-width: 700px), (max-height: 500px) {
+    #avatar .lb-card, #lobby .lb-card { max-height: calc(100vh - 24px); overflow-y: auto; }
+    #av-rows { max-height: none; }
+    #radiomenu, #tvmenu { max-width: calc(100vw - 16px); max-height: calc(100vh - 16px); overflow-y: auto; }
+  }
+  @media (max-height: 500px) {
+    #av-canvas { height: 160px; }
+  }
   #avbtn {
     position: fixed; left: 12px; bottom: 12px; z-index: 5; cursor: pointer;
     background: rgba(0,0,0,.6); color: #ffe08a; border: 1px solid rgba(255,255,255,.18);
@@ -529,13 +647,22 @@
 </head>
 <body>
 <div id="lobby">
-  <div class="lb-card">
-    <div class="lb-title">ГАРАЖ</div>
-    <div class="lb-sub">Как тебя звать?</div>
-    <input type="text" id="lobby-nick" maxlength="16" placeholder="Ник" autocomplete="off" />
-    <div class="lb-err" id="lobby-err"></div>
-    <button class="lb-btn main" id="lobby-go">Войти</button><button class="lb-btn" id="lobby-guest">Случайный ник</button>
-    <div class="lb-hint">Без регистрации. Внешность запоминается под ником, пока сервер не перезапустится.</div>
+  <div class="gd-door">
+    <div class="gd-plate">
+      <i class="gd-rivet" style="left:12px;top:12px"></i><i class="gd-rivet" style="right:12px;top:12px"></i>
+      <i class="gd-rivet" style="left:12px;bottom:12px"></i><i class="gd-rivet" style="right:12px;bottom:12px"></i>
+      <div class="gd-sub">ГСК · бокс 47</div>
+      <div class="gd-title">ГАРАЖ</div>
+      <div class="gd-numplate">
+        <input type="text" id="lobby-nick" maxlength="16" placeholder="твой ник" autocomplete="off" spellcheck="false" />
+        <div class="gd-rus">RUS<i class="gd-flag"></i></div>
+      </div>
+      <div class="lb-err" id="lobby-err"></div>
+      <button class="gd-open" id="lobby-go">Открыть ворота</button>
+      <button class="gd-guest" id="lobby-guest">зайти без ника</button>
+    </div>
+    <div class="gd-hazard"></div>
+    <div class="gd-bottom"><div class="gd-handle"></div></div>
   </div>
 </div>
 <div id="avatar">
@@ -553,6 +680,16 @@
   </div>
 </div>
 <button id="avbtn">👕 Персонаж (P)</button>
+<div id="touchui">
+  <div id="tc-stick"><div id="tc-knob"></div></div>
+  <div id="tc-top">
+    <div class="tc-btn" data-act="avatar">👕</div><div class="tc-btn" data-act="chat">💬</div><div class="tc-btn" data-act="tv">📺</div>
+  </div>
+  <div id="tc-btns">
+    <div class="tc-btn" data-key="KeyV">🎙</div><div class="tc-btn" data-key="KeyC">⇩</div><div class="tc-btn" data-key="KeyE">E</div><br>
+    <div class="tc-btn big" data-act="punch">👊</div><div class="tc-btn big" data-key="Space">⤒</div>
+  </div>
+</div>
 <div id="chat">
   <div id="chatlog"></div>
   <div id="chatbox-inner"><input id="chatinput" placeholder="Сообщение… (Enter — отправить)" /></div>
